@@ -1,0 +1,125 @@
+<launch>
+  <!--
+  ══════════════════════════════════════════════════════════════════════════
+    carebot_nav_kit / bringup.launch
+    底盘 + 雷达 + IMU + 静态TF + EKF —— 建图与导航的共同底座
+  ══════════════════════════════════════════════════════════════════════════
+
+    为什么要有这一层：
+      组委会的 car_nav.launch 把底盘/IMU/EKF/TF 全揉在一起，且硬编码某个雷达型号。
+      换一台硬件（或某个包没编译）就会整体失败。
+      本文件把它拆开，每个子系统都可以单独选驱动或关掉。
+
+    用法：
+      # 实验室实车（默认）
+      roslaunch carebot_nav_kit bringup.launch
+
+      # 换硬件：改用备选 profile
+      roslaunch carebot_nav_kit bringup.launch \
+          base_driver:=arduino laser_driver:=ls01d imu_driver:=art_imu
+
+      # 只起底盘和雷达
+      roslaunch carebot_nav_kit bringup.launch start_imu:=false
+
+      # 不用 EKF，直接用底盘原始 /odom
+      roslaunch carebot_nav_kit bringup.launch use_ekf:=false
+
+      # TF 已由组委会 car_nav.launch 发布，避免重复
+      roslaunch carebot_nav_kit bringup.launch start_static_tf:=false
+
+    ⚠️ 关于 TF 重复：
+      组委会 car_nav.launch 内部也发布 base_footprint→base_link→laser/IMU 这几个 TF。
+      如果你同时用 car_nav.launch，请加 start_static_tf:=false，
+      否则同一对 frame 有两个发布者，rviz 里会看到 TF 抖动、建图扭曲。
+  ══════════════════════════════════════════════════════════════════════════
+  -->
+
+  <!-- ===================== 子系统选择 ===================== -->
+  <arg name="base_driver"  default="stm32"       doc="stm32 | arduino | none" />
+  <arg name="laser_driver" default="lslidar_m10" doc="lslidar_m10 | ls01d | rplidar | none" />
+  <!--
+    ⚠️ 默认 yesense：**这台实车的 IMU 是 YESENSE 模块**，
+       由 `omniWheelCareRobot/rosCode` 那份 `art_imu_01` 驱动
+       （节点 `art_imu_01_node`，/dev/art_imu @460800）。
+
+    车上有两份同名 `art_imu_01`：
+      · catkin_ws 那份是**另一种 IMU** 的驱动（协议帧头 A5 0A 01），
+        用它会报 "Unable to open port" 或者读出一堆垃圾数据
+      · rosCode 那份才是本车的（YESENSE）
+    所以 `/home/ub/Hajimi/LXH/env.sh` 里把 rosCode/src 排在 catkin_ws/src 前面。
+    细节见 launch/include/imu.launch 的长注释。
+  -->
+  <arg name="imu_driver"   default="yesense"     doc="yesense | none" />
+
+  <!-- ===================== 开关 ===================== -->
+  <arg name="start_base"      default="true" />
+  <arg name="start_laser"     default="true" />
+  <arg name="start_imu"       default="true" />
+  <arg name="start_ekf"       default="true" />
+  <arg name="start_static_tf" default="true" />
+  <arg name="start_check"     default="true" />
+  <arg name="use_ekf"         default="true" />
+
+  <!-- ===================== 参数 ===================== -->
+  <arg name="base_yaml" default="$(find carebot_nav_kit)/config/robot/base.yaml" />
+  <arg name="laser_frame" default="laser_link" />
+  <arg name="imu_frame"   default="IMU_link" />
+
+  <rosparam file="$(arg base_yaml)" command="load" ns="robot_profile" />
+
+  <!-- ===================== 1. 静态 TF ===================== -->
+  <include if="$(arg start_static_tf)"
+           file="$(find carebot_nav_kit)/launch/include/static_tf.launch">
+    <arg name="laser_frame" value="$(arg laser_frame)" />
+    <arg name="imu_frame"   value="$(arg imu_frame)" />
+  </include>
+
+  <!-- ===================== 2. 底盘 ===================== -->
+  <include if="$(arg start_base)"
+           file="$(find carebot_nav_kit)/launch/include/base.launch">
+    <arg name="driver" value="$(arg base_driver)" />
+  </include>
+
+  <!-- ===================== 3. 激光雷达 ===================== -->
+  <include if="$(arg start_laser)"
+           file="$(find carebot_nav_kit)/launch/include/laser.launch">
+    <arg name="driver" value="$(arg laser_driver)" />
+  </include>
+
+  <!-- ===================== 4. IMU ===================== -->
+  <!--
+    IMU 用于 EKF 融合，能显著改善 3m 小场地里的定位稳定性。
+    但若 IMU 驱动有问题（比如静止漂移），关掉它只用轮式里程计反而更稳 —— 用
+    start_imu:=false start_ekf:=false 回到纯轮式里程计。
+  -->
+  <include if="$(arg start_imu)"
+           file="$(find carebot_nav_kit)/launch/include/imu.launch">
+    <arg name="driver" value="$(arg imu_driver)" />
+  </include>
+
+  <!-- ===================== 5. EKF 融合 ===================== -->
+  <include if="$(arg start_ekf)"
+           file="$(find carebot_nav_kit)/launch/include/ekf.launch">
+    <arg name="base_yaml" value="$(arg base_yaml)" />
+    <arg name="imu_frame" value="$(arg imu_frame)" />
+  </include>
+
+  <!-- ===================== 6. 里程计话题统一 ===================== -->
+  <!--
+    把融合后的里程计转发到 /odom。
+    原因：amcl / costmap / move_base 的默认配置都硬编码订阅 /odom，
+    relay 一层比在十几个地方写 remap 更省事，也不容易漏。
+  -->
+  <node if="$(arg use_ekf)" pkg="topic_tools" type="relay"
+        name="odom_relay" args="/odometry/filtered /odom" output="screen" />
+
+  <!-- ===================== 7. 延迟自检 ===================== -->
+  <!--
+    不阻塞启动。15 秒后跑一次检查，把"哪个子系统没起来"直接打到终端，
+    省去手动 rostopic list 逐项排查。
+  -->
+  <node if="$(arg start_check)" name="nav_check_bringup"
+        pkg="carebot_nav_kit" type="nav_check.py"
+        args="--wait 15 --brief" output="screen" />
+
+</launch>

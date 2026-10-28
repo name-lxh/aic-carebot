@@ -1,0 +1,82 @@
+# ============================================================================
+#  device_map.lab.yaml — 当前实验室 HA（192.168.8.190）实测实体映射
+# ============================================================================
+#  生成时间：2026-10-20
+#  来源：GET http://192.168.8.190:8123/api/states 全量枚举后逐条核对
+#  说明：与出厂 home_assistant.yaml 的 entity_id 完全不同 ——
+#        现场设备是重新配网的，实体名是 HA 自动生成的拼音 slug。
+#        本文件只用于实验室联调，未替换 config/device_map.yaml 出厂映射。
+#
+#  用法：
+#      export HA_TOKEN='<长期令牌>'
+#      roslaunch carebot_iot iot.launch \
+#          base_url:=http://192.168.8.190:8123 \
+#          device_map:=$(rospack find carebot_iot)/config/device_map.lab.yaml
+# ============================================================================
+
+base_url: "http://192.168.8.190:8123"
+
+controllable:
+  light_bedroom:
+    entity_id: "light.deng_guang"
+    domain: light
+    desc: "灯光"
+    on_state: "on"
+    off_state: "off"
+
+  curtain_bedroom:
+    entity_id: "cover.zhi_neng_chuang_lian_ban_lu"
+    domain: cover
+    desc: "智能窗帘伴侣"
+    on_state: "open"
+    off_state: "closed"
+
+  socket_1:
+    entity_id: "switch.zhi_neng_cha_zuo_kai_guan_1"
+    domain: switch
+    desc: "智能插座开关1"
+    on_state: "on"
+    off_state: "off"
+
+  switch_2:
+    entity_id: "switch.kai_guan_2"
+    domain: switch
+    desc: "开关2"
+    on_state: "on"
+    off_state: "off"
+
+sensors:
+  illuminance:
+    entity_id: "sensor.guang_zhao_chuan_gan_qi_illuminance"
+    desc: "光照强度"
+    unit: "lx"
+
+  temperature:
+    entity_id: "sensor.wen_shi_du_chuan_gan_qi_temperature"
+    desc: "温度"
+    unit: "°C"
+
+  humidity:
+    entity_id: "sensor.wen_shi_du_chuan_gan_qi_humidity"
+    desc: "湿度"
+    unit: "%"
+
+  smoke:
+    entity_id: "sensor.0x54ef4410012b2427_gas_density"
+    desc: "烟雾浓度"
+    unit: "%LEL"
+    threshold: 10
+    threshold_text: "检测到烟雾，请及时处理"
+    normal_text: "正常"
+
+  water_leak:
+    entity_id: "binary_sensor.0x54ef44100193118a_water_leak"
+    desc: "漏水检测"
+    on_state: "on"
+    on_text: "检测到漏水，请及时处理"
+    off_text: "正常"
+
+groups: {}
+
+legacy_topics:
+  enabled: false

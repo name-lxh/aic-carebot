@@ -1,0 +1,52 @@
+<launch>
+  <!--
+    底盘子系统 —— 按 profile 选择驱动
+    ══════════════════════════════════════════════════════════════════════
+    关于"缺包降级"的设计说明（重要，踩过坑）：
+
+      ROS 1 的 roslaunch **无法**用 if 条件挡住 `$(find 缺失包)` 的求值。
+      实测确认下面这种写法是**无效的**：
+
+          <group if="$(eval find('base_control') is not None)">
+            <include file="$(find base_control)/launch/stm32.launch" />
+          </group>
+
+      即使条件为假、group 被跳过，roslaunch 仍会先求值子元素里的
+      `$(find base_control)`，然后抛 "Resource not found"。
+      对照实验：driver=stm32 失败、driver=none 成功 —— 说明"包不存在"
+      这件事本身挡不住 $(find)。
+
+      → 所以本包采用**桩包策略**：
+        用 scripts/make_stub_packages.py 为缺失的包生成最小桩包，
+        让 `rospack find` 成功，launch 就能正常解析。
+        桩包的 launch 文件只打印一条"请安装真实包"的提示。
+
+        准备步骤（只需一次）：
+            cd ~/catkin_ws
+            python3 src/carebot_nav_kit/scripts/make_stub_packages.py
+            catkin_make && source devel/setup.bash
+
+        上实车时把真实包放进 src/，删掉对应桩包即可：
+            rm -rf src/_stubs/base_control && catkin_make
+    ══════════════════════════════════════════════════════════════════════
+
+    用法：
+      roslaunch carebot_nav_kit include/base.launch driver:=stm32
+      roslaunch carebot_nav_kit include/base.launch driver:=arduino
+      roslaunch carebot_nav_kit include/base.launch driver:=none    # 我自己起
+  -->
+  <arg name="driver" default="stm32"
+       doc="stm32 | arduino | none" />
+
+  <!-- ============ STM32 底盘（组委会 base_control 包，/dev/stm32 @115200）============ -->
+  <group if="$(eval arg('driver') == 'stm32')">
+    <include file="$(find base_control)/launch/stm32.launch" />
+  </group>
+
+  <!-- ============ Arduino 兼容底盘（ros_arduino_python，/dev/ttyACM0 @57600）============ -->
+  <group if="$(eval arg('driver') == 'arduino')">
+    <include file="$(find ros_arduino_python)/launch/arduino.launch" />
+  </group>
+
+  <!-- driver:=none 时不启动任何底盘驱动 -->
+</launch>

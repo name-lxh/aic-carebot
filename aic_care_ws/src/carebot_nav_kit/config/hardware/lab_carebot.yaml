@@ -1,0 +1,117 @@
+# ============================================================================
+#  硬件配置 profile —— 实验室实车（组委会 carebot 平台标准配置）
+# ============================================================================
+#  实测依据（来自 docs/01_机器人平台与操作指南.md §3.1 / §6）：
+#    · 底盘：STM32F407VET6，USB 转串口 /dev/stm32，115200 8N1
+#            二进制帧 0x5A|LEN|ID|CMD|DATA|0x00|CRC8(MAXIM)
+#            发布 /odom @50Hz、/feedback_vel
+#    · 雷达：镭神 LSLIDAR M10，/dev/carebot_laser_ls
+#    · IMU ：fdilink AHRS，/dev/fdilink_ahrs，921600
+# ============================================================================
+
+profile_name: "lab_carebot"
+profile_desc: "实验室实车：STM32 底盘 + LSLIDAR M10 + fdilink AHRS"
+
+# ---------------------------------------------------------------------------
+#  子系统
+# ---------------------------------------------------------------------------
+#  enable: 是否启动（false 时表示"我自己另外启动，别管我"）
+#  launch: 组委会提供包里的 launch 文件
+#  launch_pkg_required: true 表示该包必须在，否则本包会跳过并给出明确提示
+# ---------------------------------------------------------------------------
+subsystems:
+
+  base:
+    enable: true
+    launch_pkg: base_control
+    launch_file: stm32.launch
+    launch_pkg_required: true
+    desc: "STM32 底盘驱动"
+    # 该 launch 已设置：端口 /dev/stm32、波特率 115200
+    publishes:
+      - /odom
+      - /feedback_vel
+    subscribes:
+      - /cmd_vel
+    fallback_hint: >
+      若报 "package base_control not found"，说明组委会源码未编译。
+      请在机器人上执行：cd ~/omniWheelCareRobot/rosCode && catkin_make
+      或用 ROS 参数 base_launch_pkg 指定其他包名。
+
+  laser:
+    enable: true
+    launch_pkg: lslidar_driver
+    launch_file: lslidar_serial.launch
+    launch_pkg_required: true
+    desc: "镭神 M10 激光雷达"
+    publishes:
+      - /scan
+    frame_id: laser_link
+    fallback_hint: >
+      若雷达无数据，检查：
+        1. ls -l /dev/carebot_laser_ls
+        2. udev 规则是否安装：lslidar_driver/scripts/*.rules
+        3. 串口是否被其他进程占用：sudo lsof /dev/carebot_laser_ls
+
+  imu:
+    enable: true
+    launch_pkg: fdilink_ahrs
+    launch_file: ahrs_driver.launch
+    launch_pkg_required: true
+    desc: "fdilink AHRS 惯性单元"
+    publishes:
+      - /imu
+    frame_id: gyro_link
+    fallback_hint: >
+      若报 "package fdilink_ahrs not found"，说明组委会源码未编译。
+      组委会 art_imu_01 是备选方案（不同型号 IMU），
+      可把 imu_launch_pkg 参数改为 art_imu_01、imu_launch_file 改为 demo.launch。
+
+  camera:
+    enable: false          # 相机的启动不属于导航包职责，由 carebot_face/qr 负责
+    launch_pkg: astra_launch
+    launch_file: astra.launch
+    launch_pkg_required: false
+    desc: "深度相机（默认不由本包启动）"
+
+# ---------------------------------------------------------------------------
+#  里程计链路
+# ---------------------------------------------------------------------------
+odometry:
+  # 底盘原始里程计话题
+  raw_topic: /odom
+  # 使用 EKF 融合（imu + odom），输出去 /odometry/filtered
+  use_ekf: true
+  ekf_type: robot_localization     # robot_localization | robot_pose_ekf | none
+  fused_topic: /odometry/filtered
+  # 融合是否使用 IMU
+  imu_used: true
+
+# ---------------------------------------------------------------------------
+#  静态 TF 声明
+# ---------------------------------------------------------------------------
+#  这些变换由本包的 bringup 统一发布。
+#  **不要把组委会 car_nav.launch 里的 static_transform_publisher 重复启动**，
+#  否则同一对 frame 会有两个发布者，TF 树会抖动。
+# ---------------------------------------------------------------------------
+static_tf_from_base_yaml: true
+
+# ---------------------------------------------------------------------------
+#  传感器特性（影响 SLAM 参数）
+# ---------------------------------------------------------------------------
+laser:
+  # ⚠️ 型号待现场确认。
+  #    指导书报的是镭神 LSLIDAR M10；但用户手上实际是 RPLIDAR A1M8。
+  #    实验室实车究竟装哪个，上车后必须先核实 —— 两者参数差别很大：
+  #      LSLIDAR M10  ：量程 12m/8m，扫描频率 10Hz 级
+  #      RPLIDAR A1M8 ：量程 12m，实测频率 7.31Hz，角度增量 0.5°
+  #    核实方法：python3 verify_nav_config.py 之后，
+  #             再跑 rosrun carebot_nav_kit nav_check.py，
+  #             看它打印的 /scan 的 angle_increment 和实测频率。
+  min_range: 0.15
+  max_range: 12.0
+  # SLAM 实际使用范围（比硬件上限小，避免远处噪声）
+  slam_max_range: 8.0
+  # 是否水平安装（倾角会影响建图质量）
+  horizontal: true
+

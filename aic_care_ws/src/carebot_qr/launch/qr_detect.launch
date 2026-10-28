@@ -1,0 +1,19 @@
+<launch>
+  <!--
+    二维码识别节点启动文件
+    依赖：已启动相机  roslaunch astra_launch astra.launch
+    用法：roslaunch carebot_qr qr_detect.launch
+  -->
+
+  <arg name="image_topic" default="/camera/rgb/image_raw" />
+  <arg name="light_trigger_topic" default="" />
+  <arg name="roi_top_ratio" default="0.0" />
+
+  <node name="qr_detector" pkg="carebot_qr" type="qr_detector.py" output="screen">
+    <rosparam file="$(find carebot_qr)/config/qr_params.yaml" command="load" />
+    <param name="image_topic" value="$(arg image_topic)" />
+    <param name="light_trigger_topic" value="$(arg light_trigger_topic)" />
+    <param name="roi_top_ratio" value="$(arg roi_top_ratio)" />
+  </node>
+
+</launch>

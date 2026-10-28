@@ -1,0 +1,22 @@
+#Description:
+#  全局代价地图参数配置文件,各参数的意义如下：
+#  global_frame:在全局代价地图中的全局坐标系;
+#  robot_base_frame:机器人的基坐标系;
+#
+global_costmap:
+  global_frame: map
+  robot_base_frame: base_link
+  update_frequency: 10.0
+  publish_frequency: 5.0
+  static_map: true
+  rolling_window: false
+  transform_tolerance: 0.5
+  track_unknown_space: true
+  plugins:
+    # 2026-10-21 FIX: 全局代价图**去掉激光障碍层**。
+    #   原因：房间只有 0.85 m 宽，人站在车旁（人脸核验时就在车前 0.5~0.7 m）
+    #   会在全局图上把唯一通路标成致命障碍 -> 全局规划器 21858 次
+    #   "Failed to get a plan" -> 原地转圈恢复机器人卡死。
+    #   动态障碍由局部代价图负责，全局图只按静态地图规划即可。
+    - {name: static_layer,    type: "costmap_2d::StaticLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}

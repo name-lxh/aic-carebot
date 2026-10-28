@@ -1,0 +1,71 @@
+<launch>
+  <!--
+    IMU 子系统 —— 按 profile 选择驱动
+    ══════════════════════════════════════════════════════════════════════
+
+    ## ⚠️⚠️⚠️ 这台车的 IMU 是 **YESENSE**，不是 art_imu 那个小模块
+
+    车上存在**两份同名不同版本的 `art_imu_01`**：
+
+      A) /home/ub/catkin_ws/src/art_imu_01
+           节点 art_imu_node   launch demo.launch
+           参数 serial_port / baudrate(代码默认 500000)
+           —— 是**另一种 IMU**（协议要求帧头 A5 0A 01 ... 0D 0A）
+
+      B) /home/ub/omniWheelCareRobot/rosCode/src/art_imu_01   ★ 本车用这个
+           节点 art_imu_01_node（源码 yesense_driver.cpp）
+           参数 imu_port / imu_baudrate / imu_topic
+           额外发布 /imu/inertial_data /imu/nav_data /imu/sensor_data
+                  /imu/imu_status /imu/gnss_data ...
+
+    ### 怎么发现的（两次踩坑）
+
+    1. 先按 A 的 demo.launch 起，报 "Unable to open port"，进程 abort：
+       demo.launch **没写 baudrate**，用了 C++ 里的默认 500000，
+       而 500000 在这台机器的 termios 上**不支持**（打不开）。
+       实测 460800 才有数据。
+
+    2. 补上 460800 后节点起来了，但数据是垃圾：
+           orientation = (0,0,0,1)  恒定单位四元数
+           angular_velocity.x = -22.67  （明显是 int16 误读）
+       于是抓原始串口字节（imu_frame_probe.py）：
+           A5 0A 01 帧头 **0 次**
+       确认 A 的解析协议和这个设备**根本不匹配**。
+
+    3. 查 `edg_team/edg_start_all.sh`（另一个组在本机能跑的脚本），
+       它把 rosCode/src 排在 catkin_ws/src 前面 → 用的是 B。
+       且 B 的 /imu/* 话题列表与**重装系统前那台车**的实测记录完全一致。
+
+    ### 结论
+
+    · 必须让 rospack 解析到 **B**（rosCode 那份）
+      —— 已在 `/home/ub/Hajimi/LXH/env.sh` 里把 rosCode/src 提前
+    · 节点名是 **`art_imu_01_node`**，参数名是 imu_port/imu_baudrate/imu_topic
+    · 波特率 **460800**，frame_id 用我们的 `IMU_link`，topic 用 `/imu_data`
+
+    ══════════════════════════════════════════════════════════════════════
+    用法：
+      roslaunch carebot_nav_kit include/imu.launch driver:=yesense
+      roslaunch carebot_nav_kit include/imu.launch driver:=none
+  -->
+  <arg name="driver"    default="yesense"
+       doc="yesense（本车 art_imu_01_node）| none" />
+  <arg name="imu_frame" default="IMU_link" />
+  <arg name="imu_port"  default="/dev/art_imu" />
+  <!-- 实测可用；厂商 C++ 默认的 500000 在这台机器上 termios 不支持 -->
+  <arg name="imu_baud"  default="460800" />
+  <arg name="imu_topic" default="/imu_data" />
+
+  <!-- ============ YESENSE（art_imu_01_node @460800）—— 本车实际 ============ -->
+  <group if="$(eval arg('driver') == 'yesense')">
+    <node pkg="art_imu_01" type="art_imu_01_node" name="art_imu_01_node"
+          required="true" output="screen">
+      <param name="imu_port"     type="string" value="$(arg imu_port)" />
+      <param name="imu_baudrate" type="int"    value="$(arg imu_baud)" />
+      <param name="frame_id"     type="string" value="$(arg imu_frame)" />
+      <param name="imu_topic"    type="string" value="$(arg imu_topic)" />
+    </node>
+  </group>
+
+  <!-- driver:=none 时不启动 IMU -->
+</launch>

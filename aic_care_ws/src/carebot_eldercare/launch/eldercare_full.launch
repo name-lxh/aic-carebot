@@ -1,0 +1,128 @@
+<launch>
+  <!--
+  ══════════════════════════════════════════════════════════════════════════
+    智慧养老护理赛题 — 比赛一键启动
+  ══════════════════════════════════════════════════════════════════════════
+    启动内容（可用参数逐个开关）：
+      1. 导航栈      car_nav(底盘+IMU+EKF) + laser_filter(雷达) + amcl + map_server + move_base
+      2. 相机        astra.launch
+      3. 语音        xf_mic_asr_offline/voice_control.launch + carebot_voice/voice_bridge
+      4. 物联网      carebot_iot/iot_bridge
+      5. 感知        carebot_qr/qr_detector + carebot_face/face_gate
+      6. 编排        carebot_eldercare/mission_manager
+
+    前置条件：
+      · 已安装全部 udev 规则（见 docs/00_技术方案.md §3.1）
+      · 已在 carebot_nav_kit/maps/ 下准备好现场地图
+      · 已设置 HA_TOKEN 环境变量或 /etc/carebot/ha_token
+
+    典型用法：
+      # 完整比赛启动
+      roslaunch carebot_eldercare eldercare_full.launch
+
+      # 指定地图与 HA 地址
+      roslaunch carebot_eldercare eldercare_full.launch \
+          map_file:=$(find carebot_nav_kit)/maps/mymap.yaml \
+          ha_base_url:=http://192.168.8.190:8123
+
+      # 赛前彩排：不控实物、不开导航（只验证状态机与感知）
+      roslaunch carebot_eldercare eldercare_full.launch start_nav:=false dry_run:=true
+  ══════════════════════════════════════════════════════════════════════════
+  -->
+
+  <!-- ===== 开关 ===== -->
+  <arg name="start_nav"      default="true"  doc="启动导航栈（car_nav + 雷达 + amcl + move_base）" />
+  <arg name="start_camera"   default="true"  doc="启动 Astra 深度相机" />
+  <arg name="start_voice"    default="true"  doc="启动讯飞麦克风阵列 + 语音桥接" />
+  <arg name="start_iot"      default="true"  doc="启动 HomeAssistant 物联网桥接" />
+  <arg name="start_qr"       default="true"  doc="启动二维码识别" />
+  <arg name="start_face"     default="true"  doc="启动人脸核验门禁" />
+  <arg name="start_mission"  default="true"  doc="启动任务状态机" />
+
+  <!-- ===== 硬件选择（换机器人只改这几个）===== -->
+  <arg name="base_driver"  default="stm32"       doc="stm32 | arduino | none" />
+  <arg name="laser_driver" default="lslidar_m10" doc="lslidar_m10 | ls01d | rplidar_a2 | none" />
+  <arg name="imu_driver"   default="fdilink"     doc="fdilink | art_imu | none" />
+
+  <!-- ===== 关键配置 ===== -->
+  <arg name="map_file"    default="$(find carebot_nav_kit)/maps/mymap.yaml" />
+  <arg name="nav_rviz"    default="true"  doc="导航时是否开 rviz（比赛时建议关掉省算力）" />
+  <arg name="ha_base_url" default="http://192.168.8.190:8123" />
+  <arg name="token_file"  default="/etc/carebot/ha_token" />
+  <arg name="master_ids"  default="3" />
+  <arg name="tts_bin"     default="" />
+  <arg name="dry_run"     default="false" />
+  <arg name="autostart"   default="false" />
+
+  <!-- ===================================================================
+       1. 导航栈
+       改用自包含的 carebot_nav_kit，不再引用组委会的 carebot_navigation。
+       好处：硬件可配置（换雷达/底盘只改参数）、不依赖组委会包是否编译、
+             便于整体打包进镜像。
+       组成：bringup(底盘/IMU/静态TF/EKF) + 激光滤波 + map_server
+             + amcl + move_base + 航点导航服务
+       =================================================================== -->
+  <group if="$(arg start_nav)">
+    <include file="$(find carebot_nav_kit)/launch/navigation.launch">
+      <arg name="map_file"      value="$(arg map_file)" />
+      <arg name="base_driver"   value="$(arg base_driver)" />
+      <arg name="laser_driver"  value="$(arg laser_driver)" />
+      <arg name="imu_driver"    value="$(arg imu_driver)" />
+      <arg name="rviz"          value="$(arg nav_rviz)" />
+      <arg name="waypoint_nav"  value="true" />
+    </include>
+  </group>
+
+  <!-- ===================================================================
+       2. 深度相机
+       =================================================================== -->
+  <include if="$(arg start_camera)" file="$(find astra_launch)/launch/astra.launch" />
+
+  <!-- ===================================================================
+       3. 语音：讯飞六麦阵列 + 语音桥接
+       注意：不启动 robot_voice/tts_subscribe（时序不可控，见 voice_bridge 注释）
+       =================================================================== -->
+  <include if="$(arg start_voice)" file="$(find carebot_voice)/launch/voice.launch">
+    <arg name="tts_bin" value="$(arg tts_bin)" />
+    <arg name="start_mic_driver" value="true" />
+  </include>
+
+  <!-- ===================================================================
+       4. 物联网桥接
+       =================================================================== -->
+  <include if="$(arg start_iot)" file="$(find carebot_iot)/launch/iot.launch">
+    <arg name="base_url"   value="$(arg ha_base_url)" />
+    <arg name="token_file" value="$(arg token_file)" />
+  </include>
+
+  <!-- ===================================================================
+       5. 感知：二维码 + 人脸核验
+       =================================================================== -->
+  <include if="$(arg start_qr)" file="$(find carebot_qr)/launch/qr_detect.launch" />
+
+  <include if="$(arg start_face)" file="$(find carebot_face)/launch/face.launch">
+    <arg name="master_ids" value="$(arg master_ids)" />
+  </include>
+
+  <!-- ===================================================================
+       6. 任务编排
+       =================================================================== -->
+  <node if="$(arg start_mission)" name="mission_manager" pkg="carebot_eldercare"
+        type="mission_manager.py" output="screen">
+    <rosparam file="$(find carebot_eldercare)/config/mission_params.yaml" command="load" />
+    <!--
+      ⚠️ 点位文件统一用 carebot_nav_kit 那一份。
+         carebot_eldercare/config/waypoints.yaml 是早期版本，已废弃。
+         只保留一份可以避免"改了一份忘了另一份"的经典错误 ——
+         表现是标定明明做了，任务跑起来还是往占位坐标走。
+
+         如果确实需要用独立的一份，把下面的路径改回去，但务必保证
+         两份内容同步。
+    -->
+    <param name="waypoints_file"
+           value="$(find carebot_nav_kit)/config/waypoints.yaml" />
+    <param name="dry_run"   value="$(arg dry_run)" />
+    <param name="autostart" value="$(arg autostart)" />
+  </node>
+
+</launch>

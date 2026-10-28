@@ -1,0 +1,40 @@
+<launch>
+  <!--
+    语音交互链路启动文件
+    ────────────────────────────────────────────────────────────────
+    组成：
+      1. xf_mic_asr_offline  — 讯飞六麦阵列驱动 + 离线命令词识别（组委会提供）
+      2. voice_bridge        — 话题归一化 + 可靠 TTS 播报（本项目自研）
+
+    注意：本 launch **不启动** robot_voice/tts_subscribe。
+    原因：它用固定文件名 + sleep(1) 播放，无法保证播报时序（详见 voice_bridge 注释）。
+    讯飞离线合成改由 xf_tts_cli 一次性进程完成，路径通过 tts_bin 指定。
+
+    用法：
+        # 1) 先编译一次性 TTS 工具（只需一次）
+        rosrun carebot_voice build_xf_tts_cli.sh ~/omniWheelCareRobot/rosCode/src/robot_voice
+        # 2) 启动
+        roslaunch carebot_voice voice.launch
+  -->
+
+  <arg name="start_mic_driver" default="true" />
+  <arg name="mic_launch_pkg"   default="xf_mic_asr_offline" />
+  <arg name="mic_launch_file"  default="voice_control.launch" />
+  <arg name="tts_bin"          default="" />
+  <arg name="play_cmd"         default="aplay -q" />
+  <arg name="enable_tts"       default="true" />
+
+  <!-- 1) 讯飞麦克风阵列 + 离线命令词识别（组委会提供） -->
+  <include if="$(arg start_mic_driver)"
+           file="$(find xf_mic_asr_offline)/launch/$(arg mic_launch_file)" />
+
+  <!-- 2) 语音桥接：话题归一化 + 带队列的可靠播报 -->
+  <node name="voice_bridge" pkg="carebot_voice" type="voice_bridge.py" output="screen">
+    <param name="play_cmd"    value="$(arg play_cmd)" />
+    <param name="tts_bin"     value="$(arg tts_bin)" />
+    <param name="enable_tts"  value="$(arg enable_tts)" />
+    <param name="echo_to_screen" value="true" />
+    <param name="announce_gap"   value="0.2" />
+  </node>
+
+</launch>

@@ -1,0 +1,36 @@
+<launch>
+  <!--
+    HomeAssistant 物联网桥接节点
+    ────────────────────────────────────────────────────────────────
+    令牌优先级：环境变量 HA_TOKEN > rosparam ~token > ~token_file
+
+    推荐（不把令牌写进 git）：
+        export HA_TOKEN='eyJhbGciOi...'
+        roslaunch carebot_iot iot.launch
+
+    或使用只读令牌文件：
+        sudo mkdir -p /etc/carebot
+        printf '%s' 'eyJhbGciOi...' | sudo tee /etc/carebot/ha_token >/dev/null
+        sudo chmod 600 /etc/carebot/ha_token
+        roslaunch carebot_iot iot.launch token_file:=/etc/carebot/ha_token
+  -->
+
+  <arg name="base_url"    default="http://192.168.8.206:8123" />
+  <arg name="token"       default="" />
+  <arg name="token_file"  default="/etc/carebot/ha_token" />
+  <arg name="device_map"  default="$(find carebot_iot)/config/device_map.yaml" />
+  <arg name="poll_period" default="2.0" />
+  <arg name="verify_after" default="true" />
+  <arg name="retry_times" default="2" />
+
+  <node name="iot_bridge" pkg="carebot_iot" type="iot_bridge.py" output="screen">
+    <param name="base_url"     value="$(arg base_url)" />
+    <param name="token"        value="$(arg token)" />
+    <param name="token_file"   value="$(arg token_file)" />
+    <param name="device_map"   value="$(arg device_map)" />
+    <param name="poll_period"  value="$(arg poll_period)" />
+    <param name="verify_after" value="$(arg verify_after)" />
+    <param name="retry_times"  value="$(arg retry_times)" />
+  </node>
+
+</launch>

@@ -1,0 +1,117 @@
+<launch>
+  <!--
+  ══════════════════════════════════════════════════════════════════════════
+    carebot_nav_kit / mapping.launch
+    一键建图：bringup + 激光滤波 + gmapping + rviz
+  ══════════════════════════════════════════════════════════════════════════
+
+    用法：
+      # 标准流程（先启动这个，再用键盘遥控走一圈）
+      roslaunch carebot_nav_kit mapping.launch
+
+      # 同时开键盘遥控（另一个终端会弹出）
+      roslaunch carebot_nav_kit mapping.launch teleop:=true
+
+      # 换硬件
+      roslaunch carebot_nav_kit mapping.launch base_driver:=arduino laser_driver:=ls01d
+
+      # 不用 rviz（省算力，用远程桌面看）
+      roslaunch carebot_nav_kit mapping.launch rviz:=false
+
+    建图流程：
+      1. 启动本 launch
+      2. 另开终端：rosrun teleop_twist_keyboard teleop_twist_keyboard.py
+      3. 慢速走遍整个场地（尤其是三个房间的门口和内部）
+      4. 回到起点附近，尽量闭合回路
+      5. 保存地图：
+           rosrun carebot_nav_kit save_map.sh            # 交互式
+           或
+           rosrun map_server map_saver -f ~/maps/mymap
+      6. 检查地图质量（见 docs/建图与导航操作手册.md）
+  ══════════════════════════════════════════════════════════════════════════
+  -->
+
+  <!-- ===================== 参数 ===================== -->
+  <arg name="base_driver"  default="stm32" />
+  <arg name="laser_driver" default="lslidar_m10" />
+  <arg name="imu_driver"   default="fdilink" />
+  <arg name="use_ekf"      default="true" />
+
+  <arg name="slam"         default="gmapping" doc="gmapping | cartographer" />
+  <arg name="rviz"         default="true" />
+  <arg name="teleop"       default="false" />
+  <arg name="start_laser_filter" default="true" />
+
+  <!-- gmapping 分辨率：0.025 = 2.5cm，3m 场地够细且文件不大 -->
+  <arg name="map_delta"    default="0.025" />
+
+  <!-- ===================== 1. 底层 bringup ===================== -->
+  <include file="$(find carebot_nav_kit)/launch/bringup.launch">
+    <arg name="base_driver"  value="$(arg base_driver)" />
+    <arg name="laser_driver" value="$(arg laser_driver)" />
+    <arg name="imu_driver"   value="$(arg imu_driver)" />
+    <arg name="use_ekf"      value="$(arg use_ekf)" />
+    <!-- 建图阶段不需要自检（bringup 内部会跑，这里避免重复） -->
+    <arg name="start_check"  value="false" />
+  </include>
+
+  <!-- ===================== 2. 激光滤波 ===================== -->
+  <!--
+    ⚠️ 必须！没有滤波的话雷达会扫到车体自身，
+       gmapping 会把机器人周围的点当成障碍物画进地图，
+       结果就是"地图上机器人走的地方全是黑的"。
+  -->
+  <include if="$(arg start_laser_filter)"
+           file="$(find carebot_nav_kit)/launch/include/laser_filter.launch" />
+
+  <!-- ===================== 3. SLAM ===================== -->
+  <group if="$(eval arg('slam') == 'gmapping')">
+    <node pkg="gmapping" type="slam_gmapping" name="slam_gmapping" output="screen">
+      <rosparam file="$(find carebot_nav_kit)/config/slam/gmapping_params.yaml"
+                command="load" />
+      <param name="delta" value="$(arg map_delta)" />
+
+      <!-- 订阅滤波后的扫描 -->
+      <remap from="scan" to="/scan_filtered" />
+      <!-- 使用 EKF 融合后的里程计 -->
+      <remap from="odom" to="/odom" />
+    </node>
+  </group>
+
+  <group if="$(eval arg('slam') == 'cartographer')">
+    <!--
+      cartographer 需要单独的配置文件与 lua 脚本，
+      且对 CPU 要求明显高于 gmapping。
+      树莓派/低配迷你主机上不推荐；已在 3m 小场地验证 gmapping 足够。
+      如需使用，请把配置放到 config/slam/cartographer/ 下再启用本分支。
+    -->
+    <node pkg="cartographer_ros" type="cartographer_node" name="cartographer_node"
+          args="-configuration_directory $(find carebot_nav_kit)/config/slam/cartographer
+                -configuration_basename carebot_2d.lua"
+          output="screen">
+      <remap from="scan" to="/scan_filtered" />
+      <remap from="odom" to="/odom" />
+    </node>
+    <node pkg="cartographer_ros" type="cartographer_occupancy_grid_node"
+          name="cartographer_occupancy_grid_node" output="screen">
+      <param name="resolution" value="$(arg map_delta)" />
+    </node>
+  </group>
+
+  <!-- ===================== 4. 键盘遥控（可选）===================== -->
+  <node if="$(arg teleop)" pkg="teleop_twist_keyboard" type="teleop_twist_keyboard.py"
+        name="teleop_twist_keyboard" output="screen" launch-prefix="xterm -e" />
+
+  <!-- ===================== 5. rviz ===================== -->
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find carebot_nav_kit)/rviz/mapping.rviz" output="screen" />
+
+  <!-- ===================== 6. 里程计漂移监视 ===================== -->
+  <!--
+    建图时盯着里程计：静止时位置/角度不应该持续漂移。
+    漂移严重说明 IMU 有问题或轮式里程计打滑，建出的地图会扭曲。
+  -->
+  <node name="odom_monitor" pkg="carebot_nav_kit" type="odom_monitor.py"
+        output="screen" args="--drift-warn 0.02" />
+
+</launch>

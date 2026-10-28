@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>carebot_iot</name>
+  <version>1.0.0</version>
+  <description>
+    智慧养老护理赛题 — HomeAssistant 物联网桥接。
+    统一封装 light / switch / cover / fan 的控制与 illuminance / temperature /
+    humidity / smoke / water_leak 的读取，提供 JSON 指令接口、写后回读校验、
+    周期轮询与旧话题协议兼容。对应赛题评分表「卧室电灯窗帘 10 分、厨房烟雾 5 分、
+    风扇 10 分、书房漏水 5 分、客厅光照 5 分、客厅温湿度 5 分」。
+  </description>
+
+  <maintainer email="team@example.com">AIC Care Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+
+  <exec_depend>python-requests</exec_depend>
+  <exec_depend>python-yaml</exec_depend>
+
+  <export/>
+  <depend>carebot_iot_msgs</depend>
+</package>

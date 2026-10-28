@@ -1,0 +1,36 @@
+<launch>
+  <!--
+    静态 TF —— base_footprint → base_link → {laser, imu, camera}
+
+    ⚠️ 重要：这些 TF **只能有一个发布者**。
+       如果你用的是组委会 car_nav.launch（它内部也发这几个 TF），
+       请把本文件关掉（start_static_tf:=false），否则 TF 树会抖动。
+
+    数值来源：组委会 car_nav.launch 实测
+      base_footprint → base_link : z = 0.06
+      base_link → laser_link     : z = 0.21
+      base_link → IMU_link       : x = 0.125, z = 0.11
+      base_link → camera_link    : x = 0.10,  z = 0.11
+
+    改车体尺寸后务必同步更新这里。
+  -->
+  <arg name="laser_frame" default="laser_link" />
+  <arg name="imu_frame"   default="IMU_link" />
+
+  <node pkg="tf" type="static_transform_publisher"
+        name="tf_base_footprint_to_base_link"
+        args="0 0 0.06 0 0 0 base_footprint base_link 50" />
+
+  <node pkg="tf" type="static_transform_publisher"
+        name="tf_base_link_to_laser"
+        args="0 0 0.21 0 0 0 base_link $(arg laser_frame) 50" />
+
+  <node pkg="tf" type="static_transform_publisher"
+        name="tf_base_link_to_imu"
+        args="0.125 0 0.11 0 0 0 base_link $(arg imu_frame) 50" />
+
+  <node pkg="tf" type="static_transform_publisher"
+        name="tf_base_link_to_camera"
+        args="0.10 0 0.11 0 0 0 base_link camera_link 50" />
+
+</launch>

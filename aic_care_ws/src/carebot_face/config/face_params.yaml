@@ -1,0 +1,39 @@
+# 人脸核验门禁参数 — 智慧养老护理赛题
+# 现场调参建议：误拒（明明是主人却说不是）→ 降低 min_confidence / vote_ratio；
+#              误受（别人也能过）      → 提高 min_confidence / vote_ratio。
+
+# --- 输入 -----------------------------------------------------------------
+image_topic: /image_face          # 组委会 face_recognition 节点的标注画面
+rst_topic:   /face_rst            # 识别结果 [人脸数, id1, 置信度1, ...]
+
+# --- 主人定义 -------------------------------------------------------------
+# 主人的 face_id。组委会 trainer.yml 里已注册 id 1~6，
+# 现场采集时用 face_dataset.py 的 face_id 参数指定，这里填对应值。
+# 多个主人用逗号分隔，例如 "3,4"
+master_ids: "2"        # ★ 2026-10-20 现场：trainer.yml 里原有 id=1（46 样本，别人），
+                      #   本次把"主人"照片注册为 id=2，所以主人 = 2
+
+# id -> 姓名映射，与 face_recognition.py 源码中的 names 表保持一致
+names: ['None', 'id1', 'id2', 'id3', 'id4', 'id5', 'id6']
+
+# --- 判定阈值 -------------------------------------------------------------
+min_confidence: 30.0    # 2026-10-20 现场实测：主人置信度 36~59，40/50 会误拒    # 置信度阈值（口径：100 - LBPH_distance，越大越可信）
+vote_ratio: 0.6         # 有脸帧中命中主人的最低比例
+sample_window: 5.0      # 单轮采样时长（秒）
+required_frames: 5      # 单轮最少采样帧数
+max_rounds: 3           # 未通过时的最大重试轮数
+
+# --- 声源定位联动（可选，创意项）------------------------------------------
+# 开启后，核验前先根据麦克风阵列的 DOA 角度转向说话人，可明显提高识别率
+turn_to_speaker: false
+speaker_turn_speed: 0.6   # rad/s
+cmd_vel_topic: /cmd_vel
+
+# --- 自识别兜底 -----------------------------------------------------------
+# 若组委会 face_recognition 节点没起来，本节点可自己跑 LBPH 识别。
+# 需要正确的 trainer.yml 与 haarcascade 绝对路径。
+self_recognition: true
+camera_topic: /camera/rgb/image_raw
+# 我们自己的训练器（可迁移、不会被其他组覆盖）
+trainer_path: /home/ub/Hajimi/LXH/face_dataset/model/trainer.yml
+cascade_path: /home/ub/omniWheelCareRobot/rosCode/src/face_recognition/script/haarcascade_frontalface_default.xml

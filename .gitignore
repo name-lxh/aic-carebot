@@ -1,0 +1,38 @@
+# ---- 大文件 / 二进制（不入库，README 说明获取方式）----
+fall/factory_fall_assets/*.pt
+vosk/voicecache/cache/*.wav
+*.pt
+*.onnx
+*.wav
+*.bag
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---- ROS ----
+devel/
+build/
+logs/
+*.pyc
+CATKIN_IGNORE
+
+# ---- 运行产物 ----
+*.log
+/tmp/
+.ros/
+
+# ---- 凭据（绝对不要提交）----
+.ha_token
+*.token
+*.pem
+secrets.json
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

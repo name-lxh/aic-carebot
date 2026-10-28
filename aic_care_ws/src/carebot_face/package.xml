@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>carebot_face</name>
+  <version>1.0.0</version>
+  <description>
+    智慧养老护理赛题 — 人脸核验门禁。
+    在组委会 face_recognition 节点的识别结果之上，增加「是否为主人」的多帧投票判定，
+    并暴露可供任务状态机调用的服务接口。
+    对应赛题规则「在 A 点进行人脸识别，识别到预先指定的主人后方可进入房间」这一门槛条件。
+  </description>
+
+  <maintainer email="team@example.com">AIC Care Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>cv_bridge</depend>
+
+  <exec_depend>face_recognition</exec_depend>
+  <exec_depend>python-opencv</exec_depend>
+
+  <export/>
+</package>

@@ -1,0 +1,36 @@
+<launch>
+  <!--
+    人脸核验门禁启动文件
+    ────────────────────────────────────────────────────────────────
+    依赖（二选一）：
+      a) 组委会识别节点：roslaunch face_recognition face_recognition.launch
+         （注意：该 launch 用了 cwd="node"，必须在 face_recognition 包内启动）
+      b) 本节点的自识别兜底（self_recognition: true，默认开启）
+
+    另外需要相机：roslaunch astra_launch astra.launch
+  -->
+
+  <arg name="start_recognizer" default="false" />
+  <!-- 训练器放我们自己的目录：厂商共用路径会被其他组重训覆盖
+       （2026-10-21 实测：昨晚采的 38 张样本被清空） -->
+  <arg name="trainer_path" default="$(env HOME)/Hajimi/LXH/face_dataset/model/trainer.yml" />
+  <arg name="master_ids"       default="2" />   <!-- 2026-10-20: 主人照片注册为 id=2（原 trainer 只有 id=1） -->
+  <arg name="min_confidence"   default="10.0" />   <!-- 2026-10-20 现场：主人实测 36~59，40/50 会误拒 -->
+  <arg name="vote_ratio"       default="0.45" />
+  <arg name="turn_to_speaker"  default="false" />
+
+  <!-- a) 组委会的人脸识别节点（可选） -->
+  <include if="$(arg start_recognizer)"
+           file="$(find face_recognition)/launch/face_recognition.launch" />
+
+  <!-- b) 核验门禁 -->
+  <node name="face_gate" pkg="carebot_face" type="face_gate.py" output="screen">
+    <param name="trainer_path" value="$(arg trainer_path)" />
+    <rosparam file="$(find carebot_face)/config/face_params.yaml" command="load" />
+    <param name="master_ids"      value="$(arg master_ids)" />
+    <param name="min_confidence"  value="$(arg min_confidence)" />
+    <param name="vote_ratio"      value="$(arg vote_ratio)" />
+    <param name="turn_to_speaker" value="$(arg turn_to_speaker)" />
+  </node>
+
+</launch>

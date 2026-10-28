@@ -1,0 +1,16 @@
+# AIC carebot 比赛场地仿真地图
+# 由 carebot_nav_kit/scripts/sim_arena.py 生成
+#
+# ⚠️ 这是**仿真场地**，用于在虚拟机上验证比赛流程。
+#    实车的比赛场地地图要用 gmapping 现场建
+#    （见 docs/建图与导航操作手册.md）。
+#
+# 尺寸 5.3 m x 5.3 m，分辨率 0.10 m/格
+# origin 是地图左下角在世界坐标里的位置 —— 与
+# fake_sensors.py 的 FakeWorld（中心为原点）对齐。
+image: sim_arena.pgm
+resolution: 0.10
+origin: [-2.650, -2.650, 0.000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

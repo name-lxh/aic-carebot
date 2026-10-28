@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<!--
+  carebot_iot_msgs — 物联网控制的服务定义
+
+  ## 为什么需要这个包
+
+  原来 `/iot/control` 用的是 `std_srvs/Trigger`，而 **Trigger 的请求是空的**：
+
+      $ cat /opt/ros/melodic/share/std_srvs/srv/Trigger.srv
+      (=== 分隔线 ===)
+      bool success
+      string message
+
+  于是两边都对不上：
+
+      mission_manager.py:902   resp = proxy(payload)      ← payload 被丢弃
+      iot_bridge.py:681        getattr(req, 'message')    ← 永远是空字符串
+
+  结果：JSON 解析失败 → 返回 success=False → **设备控制从未生效**。
+  比赛里卧室电灯/窗帘（10 分）+ 厨房风扇（10 分）= **20 分全丢**。
+
+  ⚠️ 这个 bug **静态检查发现不了**：
+      · 服务名对、类型名对、能编译、能启动
+      · 只有真的调一次、并且桩去读请求内容，才会暴露
+
+  这也说明了为什么仿真里要用**服务桩**而不是"跳过服务" ——
+  跳过就永远发现不了这类接口层的问题。
+
+  ## 为什么不用 carebot_qr_msgs 那种做法
+
+  之前给二维码做过一个 `ForceOrder.srv`，但没有单独建包，
+  导致服务类型不可复用。这次按 ROS 规范单建一个 *_msgs 包：
+  只有服务定义，不掺业务代码，任何节点都能依赖它。
+-->
+<package format="2">
+  <name>carebot_iot_msgs</name>
+  <version>1.0.0</version>
+  <description>智慧养老护理赛题 —— 物联网设备控制的服务定义</description>
+
+  <maintainer email="carebot@example.com">carebot</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <build_depend>message_generation</build_depend>
+  <exec_depend>message_runtime</exec_depend>
+
+  <build_depend>std_msgs</build_depend>
+  <exec_depend>std_msgs</exec_depend>
+</package>

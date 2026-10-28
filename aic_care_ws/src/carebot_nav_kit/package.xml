@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>carebot_nav_kit</name>
+  <version>1.0.0</version>
+  <description>
+    智慧养老护理赛题 — 自包含的建图与导航工具包。
+
+    设计目标：把"建图 + 定位 + 导航"做成一个**硬件可配置、与组委会包解耦**的单元，
+    便于整体打包进系统镜像，在不同配置的机器人上直接使用。
+
+    覆盖：
+      · 建图      gmapping / cartographer 双方案
+      · 定位      amcl（含全向/差速模型切换）
+      · 导航      move_base（GlobalPlanner + DWA / TEB）
+      · 底盘      base_control(stm32) / ros_arduino_python 双适配
+      · 雷达      LSLIDAR M10 / ls01d / RPLIDAR 多适配
+      · 里程计    EKF 融合（robot_localization / robot_pose_ekf）
+      · 工具      导航栈自检、速度标定、航点导航、地图管理
+  </description>
+
+  <maintainer email="team@example.com">AIC Care Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <!-- 本包自身依赖 -->
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>actionlib</depend>
+  <depend>move_base_msgs</depend>
+  <depend>tf</depend>
+
+  <!--
+    以下为运行时依赖，全部来自 ROS 官方二进制包（apt 可装）。
+    刻意**不依赖任何组委会提供的包**，保证打包后在新机器上可直接运行。
+  -->
+  <exec_depend>gmapping</exec_depend>
+  <exec_depend>amcl</exec_depend>
+  <exec_depend>map_server</exec_depend>
+  <exec_depend>move_base</exec_depend>
+  <exec_depend>global_planner</exec_depend>
+  <exec_depend>dwa_local_planner</exec_depend>
+  <exec_depend>costmap_2d</exec_depend>
+  <exec_depend>laser_filters</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>rviz</exec_depend>
+  <exec_depend>teleop_twist_keyboard</exec_depend>
+
+  <export/>
+</package>

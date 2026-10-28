@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>carebot_eldercare</name>
+  <version>1.0.0</version>
+  <description>
+    智慧养老护理赛题 — 任务编排核心。
+    把「自检 → 二维码 → 客厅环境 → 人脸核验 → 按序巡视卧室/厨房/书房 → 返回起点」
+    整条任务链实现为零人工干预、每步带超时与降级的有限状态机，
+    并产出结构化事件日志用于技术报告的量化分析。
+  </description>
+
+  <maintainer email="team@example.com">AIC Care Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>actionlib</depend>
+  <depend>move_base_msgs</depend>
+  <depend>tf</depend>
+
+  <!-- 本包编排的三个自研能力包 -->
+  <exec_depend>carebot_qr</exec_depend>
+  <exec_depend>carebot_iot</exec_depend>
+  <exec_depend>carebot_voice</exec_depend>
+  <exec_depend>carebot_face</exec_depend>
+
+  <export/>
+  <depend>carebot_iot_msgs</depend>
+</package>

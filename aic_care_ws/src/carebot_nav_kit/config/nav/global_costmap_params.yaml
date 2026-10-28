@@ -1,0 +1,62 @@
+# ============================================================================
+#  全局代价地图参数
+# ============================================================================
+#  全局代价地图把静态地图 + 障碍物层 + 膨胀层合成一张"哪里能走"的成本图，
+#  供全局规划器搜索路径。
+# ============================================================================
+
+global_costmap:
+  global_frame: map
+  robot_base_frame: base_footprint
+
+  # ------------------------------------------------------------------------
+  # ⚠️⚠️ 必须显式写 width/height/origin —— 否则默认 10x10 m 且原点在 (0,0)
+  # ------------------------------------------------------------------------
+  # 实测踩坑（第一次跑导航，四个目标全部 ABORTED，25 s 位置没动）：
+  #   move_base 日志狂刷
+  #       The robot's start position is off the global costmap.
+  #       Planning will always fail, are you sure the robot has been
+  #       properly localized?
+  #
+  #   查参数：
+  #       width=10  height=10  resolution=0.05  origin(0.00, 0.00)
+  #       -> 实际只覆盖 x 0.00~10.00  y 0.00~10.00
+  #   而我们的地图（arena_clean）是 **8x8 m 且居中于原点**：
+  #       x ∈ [-4, 4]   y ∈ [-4, 4]
+  #   机器人站在 (-0.84, -0.10) —— 负坐标，**正好在代价地图之外**
+  #   -> 全局规划器认为"起点不在图上"，永远规划失败。
+  #
+  # 教训：`static_map: true` + `rolling_window: false` **不会**自动按地图
+  #       尺寸调整全局代价地图——它用的就是这组 width/height/origin，
+  #       不写则取 move_base 内部默认值（10x10 @ 原点）。
+  #       所以必须让它们和地图的 (尺寸, 原点) 一致。
+  #
+  # 当前地图参数（arena_clean.yaml）：
+  #     resolution 0.025   origin [-4.0, -4.0]   图像 320x320 -> 8.0 x 8.0 m
+  # 这里用 0.05 m 分辨率（全局规划不必那么细），8 m 覆盖整个场地。
+  width: 8.0
+  height: 8.0
+  resolution: 0.05
+  origin_x: -4.0
+  origin_y: -4.0
+
+  # 更新/发布频率。3m 小场地不需要太高，5Hz 足够且省算力。
+  update_frequency: 5.0
+  publish_frequency: 5.0
+
+  # 全局地图用静态地图（从 map_server 加载）
+  static_map: true
+  rolling_window: false
+
+  # TF 容忍度。树莓派/迷你主机负载高时适当调大，否则会频繁报
+  # "Timed out waiting for transform"。
+  transform_tolerance: 1.0
+
+  # 未知区域的处理：true 表示未探索区域不参与规划（更安全）
+  track_unknown_space: true
+
+  # 机器人外形由 costmap_common_params.yaml 提供（这里不重复定义）
+  plugins:
+    - {name: static_layer,    type: "costmap_2d::StaticLayer"}
+    - {name: obstacle_layer,  type: "costmap_2d::ObstacleLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}

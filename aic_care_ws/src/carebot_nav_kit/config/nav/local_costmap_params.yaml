@@ -1,0 +1,35 @@
+# ============================================================================
+#  局部代价地图参数
+# ============================================================================
+#  局部代价地图是跟随机器人的一个滚动窗口，用于避障与局部路径规划。
+#
+#  ⚠️ 修正了组委会配置里的一处错误：
+#     原 local_costmap_params.yaml 用的是 global_frame: map + static_map: true，
+#     但局部代价地图应该跟随机器人滚动，用 odom 作为固定坐标系更稳
+#     （不依赖全局定位精度）。若全局定位跳变，用 map 会导致局部规划抖动。
+# ============================================================================
+
+local_costmap:
+  # 用 odom 而非 map：局部避障不应该受全局定位跳变影响
+  global_frame: odom
+  robot_base_frame: base_footprint
+
+  update_frequency: 5.0
+  publish_frequency: 5.0
+
+  # 局部地图不用静态地图，用滚动窗口
+  static_map: false
+  rolling_window: true
+
+  # 滚动窗口尺寸。3m×3m 场地 + 机器人速度 ≤0.8m/s，
+  # 3m×3m 的窗口足够看到前方 1.5m，配合 DWA 的 sim_time=2.0 正好。
+  width: 3.0
+  height: 3.0
+  resolution: 0.05
+
+  transform_tolerance: 1.0
+  track_unknown_space: false    # 局部地图把未知当自由，避免频繁卡住
+
+  plugins:
+    - {name: obstacle_layer,  type: "costmap_2d::ObstacleLayer"}
+    - {name: inflation_layer, type: "costmap_2d::InflationLayer"}

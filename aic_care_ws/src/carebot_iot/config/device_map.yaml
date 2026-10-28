@@ -1,0 +1,148 @@
+# ============================================================================
+#  HomeAssistant 设备映射 — 智慧养老护理赛题
+# ============================================================================
+#  数据来源（权威）：组委会参考实现出厂配置
+#      _ref_src/omniWheelCareRobot/rosCode/src/mijia_control/config/home_assistant.yaml
+#      + src/home_assistant.py（出厂版，已覆盖全部 8 个设备）
+#
+#  ⚠️ 现场必须重新核对！
+#      实体 ID 是 Zigbee 设备入网时分配的 IEEE 地址，一旦重新配网就会变化。
+#      到现场后先执行：
+#          curl -H "Authorization: Bearer $HA_TOKEN" http://<盒子IP>:8123/api/states \
+#            | python -m json.tool | grep entity_id
+#      把结果与本文件逐条比对后再比赛。
+# ============================================================================
+
+# --- HomeAssistant 连接 ---------------------------------------------------
+base_url: "http://192.168.8.206:8123"     # ★ 2026-10-24 现场 mDNS 实测地址     # 出厂示例；另有说法 192.168.1.190 / 192.168.1.240
+
+# 令牌不要写在这里！优先级：环境变量 HA_TOKEN > rosparam ~token > ~token_file
+# 推荐做法：printf '%s' '<令牌>' | sudo tee /etc/carebot/ha_token >/dev/null && sudo chmod 600 /etc/carebot/ha_token
+
+
+# --- 可控设备 -------------------------------------------------------------
+#  domain: light | switch | cover | fan
+#  on_state/off_state: 回读校验时期望的 state 字符串
+controllable:
+
+  # 卧室电灯 —— 赛题「卧室：电灯/窗帘控制」10 分
+  # ★ 2026-10-20 现场实测：那盏灯是**插在智能插座1 上**的，开插座 = 开灯。
+  #   `light.deng_guang` 是个死实体（状态冻结在 16:32、turn_off 无效），不要用。
+  light_bedroom:
+    entity_id: "switch.0xa4c13851dea5f1fb"
+    domain: switch
+    desc: "卧室电灯（插座1）"
+    on_state: "on"
+    off_state: "off"
+    verify_attempts: 12      # ★ 灯是 Zigbee 插座，状态回读慢，给 12×0.5 = 6 s
+    verify_interval: 0.5
+
+  # 卧室窗帘（窗帘伴侣，cover 域）—— 赛题「卧室：电灯/窗帘控制」10 分
+  curtain_bedroom:
+    entity_id: "cover.0x54ef441000e73bf7"
+    domain: cover
+    desc: "卧室窗帘"
+    on_state: "open"
+    off_state: "closed"
+    # ★ 2026-10-23：窗帘是电机执行器，从 closed 走到 open 要十几秒。
+    #   原来的默认窗口（5×0.4 s ≈ 2 s，外层 3 次 ≈ 6 s）等不到，会误判"没能拉开"，
+    #   而实际上它过一会儿自己就到位了。这里给 16×0.5 = 8 s / 次。
+    verify_attempts: 16
+    verify_interval: 0.5
+
+  # 厨房风扇 —— ★ 2026-10-20 现场实测：插座2 上接的是风扇（开它风扇就转）
+  # ★ 2026-10-22：这一轮 fan on 失败，回读 state=unavailable —— 插座被 Z2M
+  #   短暂判为掉线。放宽回读窗口（12×0.5=6 s/次，外层 3 次 ≈ 18 s），
+  #   让它有时间重连；真掉线也只是慢一点，不会直接判失败。
+  fan_kitchen:
+    entity_id: "switch.kaiguan01"
+    domain: switch
+    desc: "厨房风扇（插座2）"
+    on_state: "on"
+    off_state: "off"
+    verify_attempts: 12      # ★ 同灯：Zigbee 插座状态回读慢
+    verify_interval: 0.5
+
+  # 厨房「传感器电源」—— ★ 现场没有独立的可控电源：
+  #   两个插座已分别接灯和风扇；烟雾/燃气报警器是电池 Zigbee 设备，断不了电。
+  #   赛题这一项只能如实说明"传感器为电池供电，无需外部电源控制"，故这里留空。
+  #   留空时 /iot/control 会返回失败，调用方应视为"未配置"而不是错误。
+  sensor_power:
+    entity_id: ""
+    domain: switch
+    desc: "厨房传感器电源（现场无此设备）"
+    on_state: "on"
+    off_state: "off"
+
+
+# --- 传感器 ---------------------------------------------------------------
+sensors:
+
+  # 客厅光照强度 —— 赛题「客厅：光照强度检测」5 分
+  illuminance:
+    entity_id: "sensor.renti_illuminance"     # ★ 现场：窗帘伴侣的 illuminance 上报 unknown，人体传感器有真实读数
+    desc: "光照强度"
+    unit: "lx"
+
+  # 客厅温度 —— 赛题「客厅：温湿度检测」5 分
+  temperature:
+    entity_id: "sensor.wendu_temperature"
+    desc: "温度"
+    unit: "°C"
+    convert: "f_to_c"        # ★ 现场：该实体上报单位是 °F（73.94），播报要 °C
+
+  # 客厅湿度 —— 赛题「客厅：温湿度检测」5 分
+  humidity:
+    entity_id: "sensor.wendu_humidity"
+    desc: "湿度"
+    unit: "%"
+
+  # 厨房烟雾浓度 —— 赛题「厨房：烟雾检测」5 分
+  #  注意：这是「烟雾浓度」数值传感器，不是 on/off 型报警器。
+  #  判定阈值现场标定：建议 > 50 视为异常（需按现场实物烟雾模块量程调整）。
+  smoke:
+    entity_id: "sensor.0x54ef441000d0bcae_smoke_density"
+    desc: "烟雾浓度"
+    unit: ""
+    threshold: 50            # 超过此值判定为「检测到烟雾」
+    threshold_text: "检测到烟雾，请及时处理"
+    normal_text: "正常"
+
+  # ⚠️ 漏水检测（赛题「书房：漏水检测」5 分）——
+  #   组委会全部资料中【没有任何漏水传感器的 entity_id】。
+  #   必须在现场用 GET /api/states 全量枚举后填入下面两项。
+  #   如果现场确实没有漏水传感器，改用串口网关 ADDR=4 的数据 2（见 iot_serial_bridge.py）。
+  water_leak:
+    entity_id: "binary_sensor.shuijin_water_leak"            # ← 现场填写，例如 binary_sensor.0x..._water_leak
+    desc: "漏水检测"
+    on_state: "on"           # 漏水时 HA 上报的 state
+    on_text: "检测到漏水，请及时处理"
+    off_text: "正常"
+
+
+# --- 设备分组（一条指令控制多个设备）--------------------------------------
+groups:
+  bedroom_all:
+    desc: "卧室全部设备"
+    members:
+      - light_bedroom
+      - curtain_bedroom
+  kitchen_all:
+    desc: "厨房全部设备"
+    members:
+      - fan_kitchen
+      - sensor_power
+
+
+# --- 兼容旧话题协议 -------------------------------------------------------
+# 组委会参考实现使用 /post_switch1 /post_light /post_curtain 等 Int32 话题控制，
+# data ∈ [0,5] 表示开，data ≥ 6 表示关。开启该选项后本节点同时兼容这套协议，
+# 便于复用参考平台已有的上层脚本。
+legacy_topics:
+  enabled: true
+  post_switch1: fan_kitchen        # 风扇继电器
+  post_switch2: sensor_power       # 传感器电源继电器
+  post_light: light_bedroom
+  post_curtain: curtain_bedroom
+  on_max: 5                        # data <= 5 -> 开
+  off_min: 6                       # data >= 6 -> 关

@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>carebot_qr</name>
+  <version>1.0.0</version>
+  <description>
+    智慧养老护理赛题 — 二维码巡视顺序识别。
+    读取张贴在客厅的 200mm×200mm 二维码，解析出 B/C/D 三个房间的巡视顺序。
+    对应赛题评分表「技术分 / 二维码识别 / 15 分」。
+  </description>
+
+  <maintainer email="team@example.com">AIC Care Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_srvs</depend>
+  <depend>cv_bridge</depend>
+  <depend>image_transport</depend>
+
+  <exec_depend>python-opencv</exec_depend>
+  <exec_depend>python-pyzbar</exec_depend>
+  <exec_depend>python-zbar</exec_depend>
+
+  <export/>
+</package>

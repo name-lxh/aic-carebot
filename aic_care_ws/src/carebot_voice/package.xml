@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>carebot_voice</name>
+  <version>1.0.0</version>
+  <description>
+    智慧养老护理赛题 — 语音交互桥接。
+    归一化 xf_mic_asr_offline 与 robot_voice 两个包互不匹配的话题名，
+    提供带队列、可等待完成、唯一文件名的可靠 TTS 播报，
+    并转发麦克风阵列的声源定位角度。
+    对应赛题评分表「技术分 / 语音交互 / 10 分」。
+  </description>
+
+  <maintainer email="team@example.com">AIC Care Team</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+
+  <!-- 语音链路依赖组委会提供的两个包；缺失时 voice_bridge 会降级而不是崩溃 -->
+  <exec_depend>xf_mic_asr_offline</exec_depend>
+  <exec_depend>robot_voice</exec_depend>
+
+  <export/>
+</package>

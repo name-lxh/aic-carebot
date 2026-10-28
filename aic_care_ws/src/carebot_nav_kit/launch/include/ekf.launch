@@ -1,0 +1,70 @@
+<launch>
+  <!--
+    里程计融合（EKF）—— 把轮式里程计与 IMU 融合
+    ────────────────────────────────────────────────────────────────────
+    为什么需要：
+      3m×3m 小场地里机器人频繁启停转向，纯轮式里程计会因打滑累积误差。
+      融合 IMU 的姿态后，amcl 的粒子收敛更快、定位跳变更少。
+
+    两种 EKF 可选（用 ekf_type 切换）：
+      robot_localization  —— 推荐。配置灵活，支持协方差、多传感器。
+      robot_pose_ekf      —— 旧实现，配置少，精度一般。
+
+    输出话题：
+      /odometry/filtered        （robot_localization）
+      /robot_pose_ekf/odom_combined（robot_pose_ekf）
+
+    ⚠️ EKF 会发布 odom → base_footprint 的 TF。
+       所以**底盘驱动不要再发这个 TF**，否则冲突。
+       组委会 stm32.launch 里 is_pub_odom_tf 默认 false，正好不冲突。
+  -->
+
+  <arg name="ekf_type"   default="robot_localization"
+       doc="robot_localization | robot_pose_ekf | none" />
+  <arg name="base_yaml"  default="$(find carebot_nav_kit)/config/robot/base.yaml" />
+  <arg name="imu_frame"  default="IMU_link" />
+  <arg name="odom_topic" default="/odom" />
+  <arg name="imu_topic"  default="/imu" />
+
+  <!-- ============ robot_localization ============ -->
+  <group if="$(eval arg('ekf_type') == 'robot_localization')">
+    <node pkg="robot_localization" type="ekf_localization_node"
+          name="ekf_se" clear_params="true" output="screen">
+      <rosparam file="$(find carebot_nav_kit)/config/nav/ekf_params.yaml"
+                command="load" />
+
+      <!-- 话题重映射：把配置里的通用名对齐到实际话题 -->
+      <remap from="odom0" to="$(arg odom_topic)" />
+      <remap from="imu0"  to="$(arg imu_topic)" />
+
+      <!-- 坐标系（与 base.yaml 保持一致） -->
+      <param name="map_frame"       value="map" />
+      <param name="odom_frame"      value="odom" />
+      <param name="base_link_frame" value="base_footprint" />
+      <param name="world_frame"     value="odom" />
+    </node>
+  </group>
+
+  <!-- ============ robot_pose_ekf ============ -->
+  <group if="$(eval arg('ekf_type') == 'robot_pose_ekf')">
+    <node pkg="robot_pose_ekf" type="robot_pose_ekf" name="robot_pose_ekf"
+          output="screen">
+      <param name="output_frame"         value="odom_combined" />
+      <param name="base_footprint_frame" value="base_footprint" />
+      <param name="freq"                 value="30.0" />
+      <param name="sensor_timeout"       value="1.0" />
+      <param name="odom_used"            value="true" />
+      <param name="imu_used"             value="true" />
+      <param name="vo_used"              value="false" />
+      <param name="debug"                value="false" />
+      <param name="self_diagnose"        value="false" />
+      <remap from="odom"     to="$(arg odom_topic)" />
+      <remap from="imu_data" to="$(arg imu_topic)" />
+    </node>
+
+    <!-- robot_pose_ekf 输出的是 odom_combined，加个别名让下游少改配置 -->
+    <node pkg="topic_tools" type="relay" name="odom_combined_relay"
+          args="/robot_pose_ekf/odom_combined /odometry/filtered" />
+  </group>
+
+</launch>

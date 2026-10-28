@@ -1,0 +1,345 @@
+<launch>
+  <!-- ========================================================================
+       sim_arena.launch — 比赛场地仿真（虚拟机上验证整条比赛流程）
+
+       ## 这个 launch 解决什么
+
+       实车之前，没有任何办法验证"比赛流程能不能跑通"：
+
+         · 编译通过 ≠ 能跑（Python 是运行时导入的）
+         · launch 能解析 ≠ 导航能规划出路径
+         · 导航能规划 ≠ 任务状态机能按 12 步走完
+
+       本 launch 把**除硬件外的整条链路**接起来：
+
+            fake_sensors（假激光/里程计/IMU，订阅 /cmd_vel 闭环）
+                 ↓ /scan  /odom  /tf
+            amcl（在比赛场地地图上定位）
+                 ↓ /amcl_pose  map→odom
+            move_base（costmap + 全局/局部规划）
+                 ↓ /cmd_vel   ← 回到 fake_sensors，形成真闭环
+            mission_manager（12 步比赛流程）
+
+       ## 为什么不用 Gazebo
+
+       虚拟机没有独立显卡，Gazebo 起不来（或卡到不能用）。
+       `fake_sensors.py` 是纯 Python 的 2D 仿真：
+         · 射线投射算激光 → 开销极小，2 核虚拟机跑得动
+         · 订阅 /cmd_vel 积分位姿 → move_base 能真正驱动它，是真闭环
+       代价是**没有物理仿真**（碰撞、打滑、摩擦都没有）——
+       但对"验证比赛流程"这个目的足够了。
+
+       ## ⚠️ 仿真验证不到的东西（别被"仿真通过"骗了）
+
+         ✘ 真实激光数据质量（噪声、反光、盲区）
+         ✘ 轮子打滑、里程计漂移
+         ✘ AMCL 在真实环境里的收敛速度
+         ✘ 门洞实际宽度够不够过
+         ✘ 硬件通信（串口、USB、网络）
+         ✘ 语音识别（没有麦克风）
+
+       ## 用法
+
+           # 只起仿真环境（自己再手动发目标点）
+           roslaunch carebot_nav_kit sim_arena.launch
+
+           # 仿真 + 完整比赛流程
+           roslaunch carebot_nav_kit sim_arena.launch with_mission:=true
+
+           # 不开 rviz（无图形界面时）
+           roslaunch carebot_nav_kit sim_arena.launch rviz:=false
+
+       ## 检查是否跑起来
+
+           rostopic hz /scan            # 应该有 ~10Hz
+           rostopic echo /amcl_pose     # 应该有定位输出
+           rosrun carebot_nav_kit fake_sensors.py 的日志里会打印起点
+       ======================================================================== -->
+
+  <arg name="rviz"          default="true" />
+  <arg name="with_mission"  default="false"
+       doc="是否同时启动 mission_manager（完整比赛流程）"/>
+  <arg name="mission_dry"   default="false"
+       doc="任务干跑：**不导航**、不调服务，只验证状态机流转"/>
+  <arg name="sim_qr_order"  default="2,3,4"
+       doc="仿真里二维码给出的房间顺序（2=卧室 3=厨房 4=书房）"/>
+  <arg name="sim_face_pass" default="true"
+       doc="仿真里人脸核验是否通过（设 false 可测「核验不过则终止」的分支）"/>
+
+  <!-- ★★ 压掉 move_base 的重试刷屏（**必须**）。
+
+       ⚠️ ROS 1 的日志级别**不走参数服务器**，走的是
+          ROSCONSOLE_CONFIG_FILE 环境变量指向的 log4cxx 配置文件。
+          我第一版用 <rosparam> 配，**完全没生效** —— 很容易搞错的地方。
+
+       ⚠️ 不压的后果（实测）：
+          规划失败时一分钟刷 100~400 MB，
+          几分钟把 30 GB 的盘写满（~/.ros/log 涨到 17 GB），
+          之后出现一串完全查不到原因的怪现象：
+              · sftp 上传静默写 0 字节（报 "size mismatch in put"）
+              · 异常 traceback 只打一半
+
+       ⚠️ 这不是"掩盖问题"：重试日志内容完全一样，价值极低。
+          真正有用的信息在别处单独打（waypoint_nav 会打目标坐标，
+          sim_diag.py 能归因失败类型）。
+          调参时把 config/rosconsole.config 改成 DEBUG 即可。 -->
+  <env name="ROSCONSOLE_CONFIG_FILE"
+       value="$(find carebot_nav_kit)/config/rosconsole.config" />
+  <env name="ROSCONSOLE_FORMAT"
+       value="[${severity}] [${node}] ${message}" />
+
+  <!-- 起点：默认在场地底部开口（朝北） -->
+  <arg name="start_x"   default="0.0" />
+  <arg name="start_y"   default="-1.90" />
+  <arg name="start_yaw" default="1.5708" />
+
+  <arg name="map_file"
+       default="$(find carebot_nav_kit)/maps/sim_arena.yaml" />
+  <arg name="waypoints_file"
+       default="$(find carebot_nav_kit)/config/waypoints_sim.yaml" />
+
+  <!-- 噪声：默认带一点更接近真实；调参时可 _noise:=0 -->
+  <arg name="noise"     default="0.01" />
+
+  <!-- ==== 仿真前自检：地图和点位必须一致 ==== -->
+  <!--
+       ⚠️ 地图 yaml 的 origin 必须等于 (-w*res/2, -h*res/2)，
+          否则 map 坐标系和 fake_sensors 的世界坐标对不上 ——
+          表现是"导航说到了，但机器人位置完全不对"。
+
+          这种错很难查（两边单独看都正常），所以这里主动比一下。
+  -->
+  <node name="sim_precheck" pkg="carebot_nav_kit" type="sim_precheck.py"
+        output="screen" required="false">
+    <param name="map_file"       value="$(arg map_file)" />
+    <param name="waypoints_file" value="$(arg waypoints_file)" />
+  </node>
+
+  <!-- ==== 1. 假传感器（比赛场地） ==== -->
+  <!--
+       ⚠️ 用 `~arena:=true` 让 fake_sensors 从 sim_arena.py 导入场地布局，
+          而不是再写一份 ASCII 地图 —— 单一数据源，避免两份地图不同步。
+          （launch 里没法设 PYTHONPATH，所以 fake_sensors 用
+            rospack 找包、再找 scripts 目录。）
+
+       ⚠️ start_yaw=1.5708 是朝 +Y（北）—— 从场地底部开口进来，
+          面朝客厅。朝向错了会让 amcl 一开始就往反方向规划。
+  -->
+  <node name="fake_sensors" pkg="carebot_nav_kit"
+        type="fake_sensors.py" output="screen">
+    <param name="arena"     value="true" />
+    <param name="start_x"   value="$(arg start_x)" />
+    <param name="start_y"   value="$(arg start_y)" />
+    <param name="start_yaw" value="$(arg start_yaw)" />
+    <param name="noise"     value="$(arg noise)" />
+  </node>
+
+  <!-- ==== 1.5 ★ 激光滤波：/scan → /scan_filtered ==== -->
+  <!--
+      ⚠️⚠️ 这一层**绝不能漏**，否则 move_base 一定报 NO PATH。
+
+      实测踩过：第一版 sim_arena.launch 没有这一段，结果
+
+          [ERROR] NO PATH!
+          [ERROR] Failed to get a plan from potential
+                  when a legal potential was found.
+
+      原因是 costmap 的 observation_sources 配的是
+
+          topic: /scan_filtered
+
+      （见 config/nav/costmap_common_params.yaml），
+      而没有 laser_filters 时 /scan_filtered **根本没人发布** ——
+      costmap 一个障碍都吃不到，全局规划器认为到处不可通行。
+
+      怎么快速判断是不是这个问题：
+          rostopic list | grep scan_filtered      # 看不到就是这个毛病
+          rosnode info /move_base | grep scan     # 会显示
+                                                  # /scan_filtered [unknown type]
+                                                  # "unknown type" = 没人发布
+
+      实车上这段由 navigation.launch 带起来（它有 start_laser_filter 参数）。
+      仿真里同样要走一遍 —— **跳过它"省事"，但会让仿真与实车不一致**，
+      等于白测。
+  -->
+  <include file="$(find carebot_nav_kit)/launch/include/laser_filter.launch">
+    <arg name="input_topic"  value="/scan" />
+    <arg name="output_topic" value="/scan_filtered" />
+  </include>
+
+  <!-- ==== 2. 地图服务器 ==== -->
+  <node name="map_server" pkg="map_server" type="map_server"
+        args="$(arg map_file)" output="screen">
+    <param name="frame_id" value="map" />
+  </node>
+
+  <!-- ==== 3. AMCL 定位 ==== -->
+  <!--
+       ⚠️ 必须给初始位姿，否则 amcl 的粒子云撒在整张地图上，
+          要好几秒才收敛 —— 那期间 move_base 规划的路径是乱的。
+          仿真里我们知道确切起点，所以直接告诉它。
+
+       ★ 下面这几个参数做成 <arg>，**可以从命令行覆盖**，
+         目的是能扫参数找最优组合：
+
+             roslaunch carebot_nav_kit sim_arena.launch \
+                 amcl_odom_model:=diff amcl_alpha1:=0.05
+
+         不覆盖时用 amcl_params.yaml 里的值（与实车一致）。
+
+         ⚠️ 为什么需要扫：实测发现 AMCL 会从"起始误差 0.17m"
+            漂到"3.3m / 52°"，规划成功率因此掉到 1/6。
+            根因在定位不在规划，但具体是哪个参数要靠数据说话 ——
+            `odom_model_type=omni` 假设有横向速度，而我们的
+            仿真运动模型只有 vx/vth（差速），这是个明显嫌疑。
+  -->
+  <arg name="amcl_odom_model" default="omni" />
+  <arg name="amcl_alpha1"     default="0.2" />
+  <arg name="amcl_alpha4"     default="0.2" />
+  <arg name="amcl_beams"      default="90" />
+
+  <node pkg="amcl" type="amcl" name="amcl" output="screen">
+    <rosparam file="$(find carebot_nav_kit)/config/nav/amcl_params.yaml"
+              command="load" />
+    <param name="initial_pose_x"   value="$(arg start_x)" />
+    <param name="initial_pose_y"   value="$(arg start_y)" />
+    <param name="initial_pose_a"   value="$(arg start_yaw)" />
+    <!-- ★ 可覆盖的调参项（见上面的说明） -->
+    <param name="odom_model_type" value="$(arg amcl_odom_model)" />
+    <param name="odom_alpha1"     value="$(arg amcl_alpha1)" />
+    <param name="odom_alpha4"     value="$(arg amcl_alpha4)" />
+    <param name="laser_max_beams" value="$(arg amcl_beams)" />
+    <!-- 仿真里定位是"完美"的，粒子数不用太多，省 CPU -->
+    <param name="min_particles" value="200" />
+    <param name="max_particles" value="1000" />
+  </node>
+
+  <!-- ==== 4. move_base ==== -->
+  <node pkg="move_base" type="move_base" name="move_base"
+        output="screen" respawn="false">
+    <!-- ⚠️⚠️ 关掉 move_base 的 /rosout 日志，**这是必须的**。
+         实测踩过：规划失败时 move_base 会**无限刷**
+             [ERROR] Failed to get a plan.
+         一分钟内把日志刷到 **400 MB**，
+         结果是磁盘被写满（VM 30G 盘，~/.ros/log 涨到 17G），
+         之后出现一串完全查不到原因的怪现象：
+             · sftp 上传静默写 0 字节
+             · 异常 traceback 只打一半
+
+         关掉之后失败信息只留在 move_base 自己的日志文件里，
+         不会淹掉整份输出。**调参时想要它，再改回 true。**
+
+         ⚠️ 注意：这**不是**掩盖问题 —— 是我们已经知道
+            规划失败会频繁重试，而重试日志的价值很低（内容完全一样）。
+            真正有用的信息（哪个目标点失败）已经在
+            waypoint_nav 里单独打了。 -->
+    <param name="shutdown_costmaps" value="false" />
+    <param name="base_global_planner"
+           value="global_planner/GlobalPlanner" />
+    <param name="base_local_planner"
+           value="dwa_local_planner/DWAPlannerROS" />
+
+    <rosparam file="$(find carebot_nav_kit)/config/nav/costmap_common_params.yaml"
+              command="load" ns="global_costmap" />
+    <rosparam file="$(find carebot_nav_kit)/config/nav/costmap_common_params.yaml"
+              command="load" ns="local_costmap" />
+    <rosparam file="$(find carebot_nav_kit)/config/nav/global_costmap_params.yaml"
+              command="load" />
+    <rosparam file="$(find carebot_nav_kit)/config/nav/local_costmap_params.yaml"
+              command="load" />
+    <rosparam file="$(find carebot_nav_kit)/config/nav/global_planner_params.yaml"
+              command="load" />
+    <rosparam file="$(find carebot_nav_kit)/config/nav/dwa_local_planner_params.yaml"
+              command="load" />
+
+    <!-- ⚠️⚠️ 这里**故意不设** global_costmap 的 width/height。
+         第一版设了（按当时 4m 场地写死 5.0），后来场地扩到 5.3m，
+         costmap 还停在 5.0 → **地图被裁掉一圈**，
+         机器人在被裁掉的区域里代价值是 -1（未知），于是：
+
+             DWA planner failed to produce path
+             NO PATH!                              （36 万条）
+             Rotate recovery can't rotate in place
+             because there is a potential collision. Cost: -1.00
+
+         而 `static_map: true` 时 costmap_2d **会自动按地图尺寸调整**，
+         手工指定只会引入"参数表和实际地图不一致"的隐患。
+
+         教训：**别手工写死能自动推导的尺寸**。
+               改了地图一定要回头搜有没有别处写死了旧尺寸。
+               （这个错误让一次测试从 5/6 成功变成 0/6，很值得记。） -->
+
+    <!-- local costmap 是 rolling window，确实需要一个尺寸。
+         3m×3m 远大于 机器人(0.36m) + 膨胀(0.44m)，够用。 -->
+    <param name="local_costmap/width"   value="3.0" />
+    <param name="local_costmap/height"  value="3.0" />
+  </node>
+
+  <!-- ==== 5. waypoint_nav（导航服务封装） ==== -->
+  <node name="waypoint_nav" pkg="carebot_nav_kit" type="waypoint_nav.py"
+        output="screen">
+    <param name="waypoints_file" value="$(arg waypoints_file)" />
+    <param name="goal_timeout"   value="45.0" />
+    <param name="max_retries"    value="2" />
+    <param name="frame_id"       value="map" />
+  </node>
+
+  <!-- ==== 6. 完整比赛流程（可选） ==== -->
+  <!--
+       ⚠️ dry_run 的用途：
+          `mission_manager.py` 在干跑模式下**不调用**二维码/人脸/IoT 服务，
+          只走导航和内部状态流转。这样在仿真里能验证：
+            · 12 步状态机能不能走完
+            · 每个点位能不能导航到
+            · 顺序解析、播报时机对不对
+          而不用先把相机、麦克风、HomeAssistant 都模拟出来。
+
+          等这些真机设备接好了，再关掉 dry_run 跑完整链路。
+  -->
+  <group if="$(arg with_mission)">
+    <!-- ==== 6a. 仿真服务桩 ==== -->
+    <!--
+         ★ 起**真的服务桩**而不是让 mission_manager 跳过服务调用。
+
+         为什么（这是本 launch 里最重要的一个设计决定）：
+
+           mission_manager 依赖四个服务：
+               /qr/detect_once   /face/verify
+               /iot/refresh      /iot/control
+
+           仿真里没有摄像头/麦克风/HomeAssistant，有两种做法：
+
+             ❌ 在 mission_manager 里加开关直接 return True
+                —— 流程能跑通，但**服务接口对不对完全没测到**。
+
+             ✅ 起服务桩，真的提供这几个服务
+                —— 测的是完整链路。接口名错、消息类型不匹配、
+                   超时处理不对，全都会暴露。
+
+         实测证明这个选择是对的：**写完桩立刻发现了一个丢 20 分的 bug** ——
+         `/iot/control` 用的是 `std_srvs/Trigger`，而 **Trigger 的请求是空的**，
+         调用方传的 `device`/`action` 被**静默丢弃**，
+         服务端永远拿到空字符串 → "打开卧室电灯"从未生效。
+         这种 bug 用"跳过服务"的方式永远发现不了。
+
+         到实车时把这些桩**换成真节点**即可，mission_manager 一行都不用改。
+    -->
+    <node name="sim_stubs" pkg="carebot_eldercare" type="sim_stubs.py"
+          output="screen">
+      <param name="qr_order"   value="$(arg sim_qr_order)" />
+      <param name="face_pass"  value="$(arg sim_face_pass)" />
+    </node>
+
+    <!-- ==== 6b. 比赛流程 ==== -->
+    <node name="mission_manager" pkg="carebot_eldercare"
+          type="mission_manager.py" output="screen">
+      <param name="waypoints_file" value="$(arg waypoints_file)" />
+      <param name="dry_run"        value="$(arg mission_dry)" />
+      <param name="autostart"      value="true" />
+    </node>
+  </group>
+
+  <!-- ==== 7. rviz ==== -->
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find carebot_nav_kit)/rviz/navigation.rviz" />
+</launch>

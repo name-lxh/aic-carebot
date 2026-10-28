@@ -1,0 +1,5 @@
+# A: ../dist/map1.pgm
+# B: ../dist/map3.pgm
+theta_deg = 298.000
+shift_m   = (0.0250, 0.4750)
+IoU       = 0.6561

@@ -1,0 +1,74 @@
+<launch>
+  <!--
+    激光雷达子系统 —— 按 profile 选择驱动
+    ══════════════════════════════════════════════════════════════════════
+    ⚠️ 一次只能选一个！多个雷达驱动同时启动会互相抢串口。
+
+    ⚠️ 关于"缺包降级"：
+       ROS 1 的 roslaunch **无法**用 if 条件挡住 $(find 缺失包) 的求值 ——
+       实测确认：即使 group 条件为假，子元素里的 $(find) 仍会先被求值，
+       于是抛 "Resource not found"。
+
+       所以本包的策略是：用 scripts/make_stub_packages.py 为缺失的包
+       生成**桩包**，让 rospack find 能成功。桩包里的 launch 只打印提示。
+
+       用法：
+           cd ~/catkin_ws
+           python3 src/carebot_nav_kit/scripts/make_stub_packages.py
+           catkin_make && source devel/setup.bash
+
+    ══════════════════════════════════════════════════════════════════════
+
+    用法：
+      roslaunch carebot_nav_kit include/laser.launch driver:=lslidar_m10
+      roslaunch carebot_nav_kit include/laser.launch driver:=ls01d
+      roslaunch carebot_nav_kit include/laser.launch driver:=rplidar
+      roslaunch carebot_nav_kit include/laser.launch driver:=none
+  -->
+  <arg name="driver" default="lslidar_m10"
+       doc="lslidar_m10 | ls01d | rplidar | none" />
+
+  <!-- RPLIDAR 参数（从上层传入）-->
+  <arg name="rplidar_port"  default="/dev/rplidar" />
+  <arg name="rplidar_frame" default="laser_link" />
+
+  <!-- ============ 镭神 M10（/dev/carebot_laser_ls）—— 实验室实车 ============ -->
+  <group if="$(eval arg('driver') == 'lslidar_m10')">
+    <include file="$(find lslidar_driver)/launch/lslidar_serial.launch" />
+  </group>
+
+  <!-- ============ ls01d 系列（/dev/laser）—— 备选 ============ -->
+  <group if="$(eval arg('driver') == 'ls01d')">
+    <include file="$(find ls01d_lidar)/launch/ls01d_lidar.launch" />
+  </group>
+
+  <!-- ============ RPLIDAR A1M8 / A2（/dev/rplidar）============ -->
+  <!--
+    实测数据（RPLIDAR A1M8）：
+      芯片 CP210x (10c4:ea60)，波特率 115200
+      角度 ±180°，增量 0.5°/点（约 721 点/圈）
+      range 0.15 ~ 12.0 m
+      实测发布频率 7.31 Hz（Sensitivity 模式）
+
+    ⚠️ 为什么不 include rplidar_ros 自带的 launch：
+       Melodic 的 rplidar_ros 只提供 rplidar.launch 和 rplidar_a3.launch，
+       **没有 rplidar.launch**；而且 rplidar.launch 里用的是 <param>
+       而不是 <arg>，无法从外部覆盖 serial_port 和 frame_id。
+
+       所以这里直接起节点，参数完全可控。
+  -->
+  <group if="$(eval arg('driver') == 'rplidar')">
+    <node name="rplidarNode" pkg="rplidar_ros" type="rplidarNode" output="screen">
+      <param name="serial_port"      type="string" value="$(arg rplidar_port)" />
+      <!-- A1/A2 是 115200；A3 是 256000 -->
+      <param name="serial_baudrate"  type="int"    value="115200" />
+      <param name="frame_id"         type="string" value="$(arg rplidar_frame)" />
+      <param name="inverted"         type="bool"   value="false" />
+      <!-- angle_compensate：把不同角速度下的扫描点做角度补偿，
+           对 SLAM 精度有帮助，A1/A2 建议开启 -->
+      <param name="angle_compensate" type="bool"   value="true" />
+    </node>
+  </group>
+
+  <!-- driver:=none 时不启动任何雷达驱动 -->
+</launch>

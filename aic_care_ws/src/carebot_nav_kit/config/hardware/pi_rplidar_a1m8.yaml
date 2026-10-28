@@ -1,0 +1,118 @@
+# ============================================================================
+#  硬件配置 profile —— 树莓派 + RPLIDAR A1M8（ROS 2 开发/验证机）
+# ============================================================================
+#  ⚠️ 本 profile 用于**树莓派侧**（ROS 2 Humble），不适用于实验室实车。
+#     实验室实车见 lab_carebot.yaml（ROS 1 Kinetic）。
+#
+#  用途：
+#    树莓派目前没有底盘，但雷达已经在手上。可以用这个 profile：
+#      · 验证雷达数据质量
+#      · 手工推着走做 SLAM 建图（验证整条建图链路）
+#      · 提前熟悉建图流程，减少实车排队时间
+#
+#  实测数据（2026-10-09）：
+#    · 雷达    RPLIDAR A1M8，CP210x USB 转串口（10c4:ea60）
+#              设备名 /dev/rplidar（udev 绑定 USB 拓扑位置 1-1.3）
+#              frame_id = laser（注意不是 laser_link）
+#              角度 ±180°，增量 0.5°/点，约 721 点/圈
+#              range_min 0.15 m，range_max 12.0 m
+#              实测发布频率 7.31 Hz（Sensitivity 模式）
+#    · 底盘    无
+#    · IMU     无
+# ============================================================================
+
+profile_name: "pi_rplidar_a1m8"
+profile_desc: "树莓派 + RPLIDAR A1M8（无底盘、无 IMU）"
+
+subsystems:
+
+  # 没有底盘 —— 如果要推着走建图，用假的里程计节点或直接让 slam 只用雷达
+  base:
+    enable: false
+    launch_pkg: ""
+    launch_file: ""
+    launch_pkg_required: false
+    desc: "无底盘（树莓派自助机没有底盘驱动）"
+    fallback_hint: >
+      树莓派上没有底盘。若要做 SLAM，需要：
+        a) 用手推着走，此时没有里程计，slam_toolbox 靠纯雷达也能建图，
+           但精度较差、容易在大面积无特征处跟丢；
+        b) 或者临时接一个编码器/底盘。
+      正式建图还是应该在实验室实车上做。
+
+  laser:
+    enable: true
+    # ROS 2 上驱动包同名但 launch 文件名与参数不同
+    launch_pkg: rplidar_ros
+    launch_file: rplidar_a1_launch.py
+    launch_pkg_required: true
+    desc: "RPLIDAR A1M8"
+    publishes:
+      - /scan
+    frame_id: laser
+    fallback_hint: >
+      启动命令（ROS 2）：
+        ros2 launch rplidar_ros rplidar_a1_launch.py \
+            serial_port:=/dev/rplidar frame_id:=laser
+      若设备名不对，跑 sudo bash ~/fix_rplidar_udev.sh 重新生成 udev 规则。
+
+  imu:
+    enable: false
+    launch_pkg: ""
+    launch_file: ""
+    launch_pkg_required: false
+    desc: "无 IMU"
+
+  camera:
+    enable: false
+    launch_pkg: ""
+    launch_file: ""
+    launch_pkg_required: false
+    desc: "无相机"
+
+odometry:
+  # 没有底盘就没有里程计。SLAM 只能靠雷达（scan matching）。
+  raw_topic: ""
+  use_ekf: false
+  ekf_type: none
+  fused_topic: ""
+  imu_used: false
+
+static_tf_from_base_yaml: false
+
+laser:
+  # A1M8 实测值
+  min_range: 0.15
+  max_range: 12.0
+  # SLAM 实际使用范围。A1M8 在 6m 外噪声明显增大，保守取 6m。
+  slam_max_range: 6.0
+  horizontal: true
+  # 角度规格（用于校验驱动配置）
+  angle_min: -3.124
+  angle_max: 3.142
+  angle_increment: 0.00871
+  # 实测发布频率；标称 5.5 Hz，当前跑在 7.31 Hz
+  scan_hz: 7.31
+  # 建议的 scan_mode（Standard 更稳，Sensitivity 更灵敏但噪声多）
+  recommended_scan_mode: Standard
+
+# ---------------------------------------------------------------------------
+#  ROS 2 专属说明
+# ---------------------------------------------------------------------------
+ros2_notes: |
+  ⚠️ 本 profile 涉及 ROS 2，与 carebot_nav_kit（ROS 1）不是同一套工具链：
+
+    | 功能     | ROS 1 (Kinetic, 实车) | ROS 2 (Humble, 树莓派) |
+    |----------|----------------------|------------------------|
+    | SLAM     | gmapping             | slam_toolbox           |
+    | 导航     | move_base            | nav2                   |
+    | 可视化   | rviz                 | rviz2 / Foxglove       |
+    | 构建     | catkin_make          | colcon build           |
+
+  carebot_nav_kit 的 launch / config 都是 ROS 1 格式，**不能直接在树莓派上运行**。
+  本 profile 的价值在于记录雷达规格参数，供两边对齐使用。
+
+  树莓派上要建图的话，装 slam_toolbox：
+      sudo apt install ros-humble-slam-toolbox
+      然后参考 slam_toolbox 的 online_async_launch.py，
+      把 scan_topic 指向 /scan，frame 用 laser。

@@ -1,0 +1,158 @@
+# ============================================================================
+#  局部规划器参数（DWAPlannerROS）
+# ============================================================================
+#  DWA（Dynamic Window Approach）在速度空间采样，前向模拟若干条轨迹，
+#  选一条"离障碍远、贴合全局路径、朝向目标"的最优轨迹执行。
+#
+#  ⚠️ 本配置相对组委会参考值做了三处关键修改：
+#
+#   1. max_vel_x 0.5 -> 0.8
+#      赛题规则要求最大速度 ≥0.6 m/s，原值不达标。
+#      注意：这里放开的是"能力上限"，实际比赛用速度缩放降下来（见 speed_scale）。
+#
+#   2. max_rot_vel 1.0 -> 4.0
+#      赛题规则要求最大转速 ≥4 rad/s，原值不达标。
+#
+#   3. holonomic_robot false -> true
+#      底盘是全向三轮，原配置按差速机器人规划，白白浪费横移能力。
+#      3m 窄场地里开启横移能大幅减少掉头动作，任务用时明显下降。
+#
+#  另外修正：原文件里 latch_xy_goal_tolerance 在顶层和 DWAPlannerROS 下
+#  各写了一次且值相反（true / false），实际生效的是 namespace 下的那个。
+#  这里只保留一处，避免歧义。
+# ============================================================================
+
+DWAPlannerROS:
+
+  # ======================= 机器人运动能力 =======================
+  # 线速度
+  max_vel_x: 0.20           # 实车调试用：从 0.12 提到 0.20（标称能力 0.8，场地小不需要那么快）
+  min_vel_x: 0.0            # 不允许后退（需要后退时用横移/转向替代）
+  max_vel_y: 0.4            # 仅全向底盘有效：横向最大速度
+  min_vel_y: 0.0
+
+  # 角速度
+  max_rot_vel: 0.8          # 实车调试用（标称能力 4.0；小场地 0.8 够）
+  min_rot_vel: 0.4
+
+  # 平移速度（合成速度上限）
+  max_trans_vel: 0.7
+  min_trans_vel: 0.05
+
+  # 加速度限制。太大会打滑（里程计漂移），太小会反应迟钝。
+  acc_lim_x: 1.0            # 加速柔一点，配合 0.20 巡航更稳
+  acc_lim_y: 1.5
+  acc_lim_theta: 4.0
+
+  # ======================= 全向运动 =======================
+  # true = 允许横移（全向底盘）
+  # ⚠️ 组委会原配置是 false，与三轮全向底盘不符
+  holonomic_robot: true
+
+  # ======================= 目标容差 =======================
+  # 到位判定：位置误差与朝向误差
+  # 小场地点位密集，容差不能太大（否则会"到错点"），也不能太小（否则永远到不了）。
+  xy_goal_tolerance: 0.08
+  yaw_goal_tolerance: 0.10
+
+  # ======================= 前向模拟 =======================
+  # sim_time 越长越有远见但越容易保守。
+  # 速度 ≤0.8m/s、场地 3m，1.5 秒足以看 1.2m，配合局部地图 3m 窗口正好。
+  sim_time: 1.8            # 看得更远，转弯更从容
+  sim_granularity: 0.025
+  angular_sim_granularity: 0.025
+
+  # 速度空间采样点数。点数越多越优但越费算力。
+  vx_samples: 20
+  vy_samples: 10            # 全向底盘才有意义
+  vtheta_samples: 40
+
+  # 控制器频率：每秒重规划次数
+  controller_frequency: 10.0
+
+  # ======================= 轨迹评分 =======================
+  # 各项权重，决定 DWA 的"性格"
+  path_distance_bias: 25.0  # 25 略放宽，允许稍微偏离路径来避障
+  goal_distance_bias: 24.0   # 朝向目标点
+  # ⚠️ 0.05 -> 0.25：**这是防蹭墙的主要手段**。
+  #    0.05 几乎不惩罚贴墙，实测蹭了两次。
+  #    靠加大 inflation_radius 来防蹭墙是错的——会把窄通道封死（试过 0.45，0/4 通过）。
+  #    正确做法：膨胀适中 + 提高 occdist_scale，让 DWA 自己远离障碍。
+  occdist_scale: 0.25
+
+  forward_point_distance: 0.325
+  stop_time_buffer: 0.2
+  scaling_speed: 0.25
+  max_scaling_factor: 0.2
+
+  # ======================= 振荡抑制 =======================
+  # 机器人移动多远后重置振荡标记。太小会误判，太大真的振荡了也不纠正。
+  oscillation_reset_dist: 0.05
+
+  # ======================= 调试/可视化 =======================
+  publish_traj_pc: true        # 发布候选轨迹点云（rviz 可视化）
+  publish_cost_grid_pc: true   # 发布代价网格
+  publish_cost_grid: true
+
+  prune_plan: false            # 不要裁掉已走过的路径（便于调试观察）
+  use_dwa: true
+  restore_defaults: false
+
+# ============================================================================
+#  move_base 顶层参数
+# ============================================================================
+
+# --- 速度缩放 --------------------------------------------------------------
+#  这是"实际比赛用速度"与"平台能力上限"分离的关键。
+#
+#  规则要求平台能力达到 ≥0.6 m/s、≥4 rad/s（上面 max_vel_x/max_rot_vel 已满足），
+#  但实际跑 3m×3m 场地用全速会：
+#    · 冲过目标点，反复调整
+#    · 转弯打滑，里程计漂移
+#    · 撞到低矮障碍
+#
+#  用 0.6 的缩放，实际速度约 0.48 m/s、角速度约 2.4 rad/s，
+#  在"够快"和"够稳"之间取得平衡。
+# ⚠️ 这是全局参数，通过 mission_manager 或 rqt_reconfigure 动态调整均可。
+move_base:
+  # 全局规划器
+  base_global_planner: "global_planner/GlobalPlanner"
+  # 局部规划器
+  base_local_planner: "dwa_local_planner/DWAPlannerROS"
+
+  # ⚠️ latch_xy_goal_tolerance 必须是**顶层参数**，不是 DWAPlannerROS 下的。
+  #    原因：move_base 从 /move_base/latch_xy_goal_tolerance 读它；
+  #    写在 DWAPlannerROS 段里会变成 /move_base/DWAPlannerROS/latch_xy_goal_tolerance，
+  #    静默失效。
+  #      true  = 进入容差后即使漂出去也算到达（原地转向微调，小场地推荐）
+  #      false = 漂出去就继续调整（容易在目标点附近反复微调）
+  #    实测教训：单元测试 test_dwa_top_level_latch_param 就是查这个的。
+  latch_xy_goal_tolerance: true
+
+  # 规划频率与执行频率
+  planner_frequency: 1.0        # 全局重规划频率（秒/次）
+  controller_frequency: 10.0    # 局部控制频率
+  planner_patience: 5.0         # 规划失败后坚持多久再放弃
+  controller_patience: 5.0      # 控制失败后坚持多久再执行恢复
+  conservative_reset_dist: 3.0  # 走多远才清空代价地图（小场地别太频繁）
+
+  # 恢复行为：卡住时依次尝试
+  #   1. 清空局部代价地图
+  #   2. 清空全局代价地图
+  #   3. 原地旋转（清掉可能粘住的障碍标记）
+  #   4. 后退一小段
+  # 3m 小场地里"原地旋转"很有效（把贴身的虚假障碍扫掉），保留。
+  recovery_behavior_enabled: true
+  clearing_rotation_allowed: true
+  recovery_behaviors: [
+    {name: conservative_reset, type: clear_costmap_recovery/ClearCostmapRecovery},
+    {name: rotate_recovery,    type: rotate_recovery/RotateRecovery},
+    {name: aggressive_reset,   type: clear_costmap_recovery/ClearCostmapRecovery}
+  ]
+
+  # 振荡检测
+  oscillation_timeout: 10.0
+  oscillation_distance: 0.2
+
+  # TF 容忍
+  transform_tolerance: 1.0

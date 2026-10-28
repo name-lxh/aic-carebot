@@ -1,0 +1,12 @@
+# 2026-10-22：去掉 move_base 的 rotate_recovery
+#
+# 默认恢复行为里有一项 rotate_recovery —— 规划失败时**原地转 360°**，
+# 现场看到"车在门口转几圈"主要就是它。它转了也不保证能算出路，
+# 白白浪费 10 秒，还把定位带飘。
+#
+# 我们自己的 goto() 里已有更聪明的恢复：卡住 -> 后退 20 cm -> 转 40° -> 重发。
+# 所以这里只保留"清理代价图"两项，去掉无意义的整圈旋转。
+recovery_behavior_enabled: true
+recovery_behaviors:
+  - {name: conservative_reset, type: clearing}
+  - {name: aggressive_reset, type: clearing}

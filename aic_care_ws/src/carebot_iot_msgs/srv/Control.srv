@@ -1,0 +1,7 @@
+# 设备控制请求：要控制哪个设备的哪个动作
+string device          # 设备名，如 light_bedroom / curtain_bedroom / fan_kitchen
+string action          # 动作，如 on / off / open / close
+string extra           # 附加参数（JSON 字符串，可空）
+---
+bool success
+string message

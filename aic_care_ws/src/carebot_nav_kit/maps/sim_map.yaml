@@ -1,0 +1,11 @@
+# AIC carebot_nav_kit 仿真测试地图
+# 由 scripts/make_sim_map.py 生成，与 nodes/fake_sensors.py 的世界一致
+#
+# ⚠️ 这是**测试用地图**，不是比赛场地地图。
+#    比赛场地地图要用 gmapping 现场建（见 docs/建图与导航操作手册.md）
+image: sim_map.pgm
+resolution: 0.200
+origin: [-4.200, -4.000, 0.000]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196

@@ -1,0 +1,132 @@
+<launch>
+  <!--
+  ══════════════════════════════════════════════════════════════════════════
+    carebot_nav_kit / navigation.launch
+    一键导航：bringup + 激光滤波 + map_server + amcl + move_base + rviz
+  ══════════════════════════════════════════════════════════════════════════
+
+    用法：
+      # 标准启动
+      roslaunch carebot_nav_kit navigation.launch
+
+      # 指定地图
+      roslaunch carebot_nav_kit navigation.launch \
+          map_file:=$(rospack find carebot_nav_kit)/maps/mymap.yaml
+
+      # 同时启动航点导航服务
+      roslaunch carebot_nav_kit navigation.launch waypoint_nav:=true
+
+      # 换硬件
+      roslaunch carebot_nav_kit navigation.launch base_driver:=arduino laser_driver:=ls01d
+
+    启动后的必要操作：
+      ⚠️ **必须**在 rviz 里用 "2D Pose Estimate" 给出机器人初始位姿，
+         否则 amcl 不知道自己在哪，所有导航目标都会失败或乱走。
+
+      若初始位姿给得不准，看 rviz 里的粒子云：
+        · 粒子散成一片     -> 位姿给错了，重给一次
+        · 粒子收敛成一小团 -> 定位成功，可以开始导航
+  ══════════════════════════════════════════════════════════════════════════
+  -->
+
+  <!-- ===================== 参数 ===================== -->
+  <arg name="base_driver"  default="stm32" />
+  <arg name="laser_driver" default="lslidar_m10" />
+  <arg name="imu_driver"   default="fdilink" />
+  <arg name="use_ekf"      default="true" />
+
+  <arg name="map_file"     default="$(find carebot_nav_kit)/maps/mymap.yaml" />
+  <arg name="rviz"         default="true" />
+  <arg name="waypoint_nav" default="true" />
+  <arg name="start_laser_filter" default="true" />
+
+  <!-- 初始位姿（可选）：若已知机器人在地图上的确切位置，填这里可免去手动 2D Pose Estimate。
+       坐标系为 map。留空则不自动设置。 -->
+  <arg name="initial_x"   default="" />
+  <arg name="initial_y"   default="" />
+  <arg name="initial_yaw" default="" />
+
+  <!-- ===================== 1. 底层 bringup ===================== -->
+  <include file="$(find carebot_nav_kit)/launch/bringup.launch">
+    <arg name="base_driver"  value="$(arg base_driver)" />
+    <arg name="laser_driver" value="$(arg laser_driver)" />
+    <arg name="imu_driver"   value="$(arg imu_driver)" />
+    <arg name="use_ekf"      value="$(arg use_ekf)" />
+    <arg name="start_check"  value="false" />
+  </include>
+
+  <!-- ===================== 2. 激光滤波 ===================== -->
+  <include if="$(arg start_laser_filter)"
+           file="$(find carebot_nav_kit)/launch/include/laser_filter.launch" />
+
+  <!-- ===================== 3. 地图服务器 ===================== -->
+  <node name="map_server" pkg="map_server" type="map_server"
+        args="$(arg map_file)" output="screen">
+    <param name="frame_id" value="map" />
+  </node>
+
+  <!-- ===================== 4. AMCL 定位 ===================== -->
+  <node pkg="amcl" type="amcl" name="amcl" output="screen">
+    <rosparam file="$(find carebot_nav_kit)/config/nav/amcl_params.yaml"
+              command="load" />
+    <!-- 订阅滤波后的扫描；里程计已经是 EKF 输出并被 relay 到 /odom -->
+    <remap from="scan" to="/scan_filtered" />
+    <remap from="odom" to="/odom" />
+  </node>
+
+  <!-- 可选：启动时自动设置初始位姿 -->
+  <node if="$(eval arg('initial_x') != '' and arg('initial_y') != '')"
+        pkg="carebot_nav_kit" type="set_initial_pose.py" name="set_initial_pose"
+        output="screen"
+        args="--x $(arg initial_x) --y $(arg initial_y) --yaw $(arg initial_yaw)" />
+
+  <!-- ===================== 5. move_base ===================== -->
+  <node pkg="move_base" type="move_base" name="move_base"
+        respawn="false" output="screen" clear_params="true">
+
+    <!-- 规划器选择 -->
+    <param name="base_global_planner" value="global_planner/GlobalPlanner" />
+    <param name="base_local_planner"  value="dwa_local_planner/DWAPlannerROS" />
+
+    <!-- 全局代价地图 -->
+    <rosparam file="$(find carebot_nav_kit)/config/nav/costmap_common_params.yaml"
+              command="load" ns="global_costmap" />
+    <rosparam file="$(find carebot_nav_kit)/config/nav/global_costmap_params.yaml"
+              command="load" />
+
+    <!-- 局部代价地图 -->
+    <rosparam file="$(find carebot_nav_kit)/config/nav/costmap_common_params.yaml"
+              command="load" ns="local_costmap" />
+    <rosparam file="$(find carebot_nav_kit)/config/nav/local_costmap_params.yaml"
+              command="load" />
+
+    <!-- 规划器参数 -->
+    <rosparam file="$(find carebot_nav_kit)/config/nav/global_planner_params.yaml"
+              command="load" />
+    <rosparam file="$(find carebot_nav_kit)/config/nav/dwa_local_planner_params.yaml"
+              command="load" />
+
+    <!-- 订阅滤波后的扫描（costmap 的 observation_sources 已指向 /scan_filtered） -->
+    <remap from="scan" to="/scan_filtered" />
+  </node>
+
+  <!-- ===================== 6. 航点导航服务 ===================== -->
+  <node if="$(arg waypoint_nav)" name="waypoint_nav"
+        pkg="carebot_nav_kit" type="waypoint_nav.py" output="screen">
+    <param name="waypoints_file"
+           value="$(find carebot_nav_kit)/config/waypoints.yaml" />
+    <param name="goal_timeout" value="60.0" />
+    <param name="max_retries"  value="2" />
+    <param name="frame_id"     value="map" />
+  </node>
+
+  <!-- ===================== 7. rviz ===================== -->
+  <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz"
+        args="-d $(find carebot_nav_kit)/rviz/navigation.rviz" output="screen" />
+
+  <!-- ===================== 8. 延迟自检 ===================== -->
+  <!-- 导航栈起来比较慢，等 20 秒再检查 -->
+  <node name="nav_check_nav" pkg="carebot_nav_kit" type="nav_check.py"
+        args="--wait 20" output="screen" />
+
+</launch>

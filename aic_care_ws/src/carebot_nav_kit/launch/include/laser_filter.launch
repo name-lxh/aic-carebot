@@ -1,0 +1,69 @@
+<launch>
+  <!--
+  ══════════════════════════════════════════════════════════════════════════
+    激光扫描滤波 —— /scan  →  /scan_filtered
+  ══════════════════════════════════════════════════════════════════════════
+
+    为什么必须有这一层：
+      雷达装在车体上，会扫到自己的外壳、支架、走线。
+      这些点表现为"距离机器人中心 0~0.2m 处有一圈障碍物"，
+      后果是：
+        · costmap 把机器人自身标成障碍
+        · 全局规划器认为起点在障碍里，规划直接失败
+        · 恢复行为不停原地旋转
+      现象很像"机器人原地打转不走路"。
+
+    三层过滤，从粗到细：
+      1. LaserScanRangeFilter    —— 砍掉太近（车体）和太远（噪声）的点
+      2. LaserScanAngularFilter  —— 砍掉被车体遮挡的扇区
+      3. LaserScanSpeckleFilter  —— 去掉孤立的零星噪点
+
+    ⚠️ 下游（costmap / gmapping / amcl）必须订阅 /scan_filtered 而不是 /scan。
+       本包的所有配置文件已经统一写成 /scan_filtered。
+  ══════════════════════════════════════════════════════════════════════════
+  -->
+
+  <arg name="input_topic"  default="/scan" />
+  <arg name="output_topic" default="/scan_filtered" />
+
+  <!-- ==================== 距离截断：阈值在 YAML 里 ==================== -->
+  <!--
+    ⚠️⚠️ 这里**故意不再放 `range_min` / `range_max` / `speckle_*` 这些 arg**。
+
+    原来放了。但它们是**死参数** —— 节点真正读的是下面
+    `laser_filter_chain.yaml` 里的 `lower_threshold` / `upper_threshold`：
+
+        <rosparam command="load"
+                  file=".../config/filters/laser_filter_chain.yaml" />
+
+    死参数的危害（实测踩过）：
+      · 有人改了 launch 里的 `range_min`，**以为生效了，其实没有**
+      · 两个地方的值会不同步，排查时看哪个都可能被误导
+      · 而近端阈值恰恰是**最容易配错、配错后导航完全跑不起来**的一项
+
+    所以：**阈值只在 YAML 里定义一处**，launch 只负责加载它。
+
+    ⚠️ 关于近端阈值的取值（这是本项目踩得最惨的一个坑）：
+       `lower_threshold` 必须大于"雷达能看到的最远车体半径"，
+       **不是** costmap 的 robot_radius。
+
+       雷达装在车体前方 8 cm，实测扫到自身最近 0.225 m。
+       原来配 0.22（"车体半径 0.18 + 4cm 余量"）→ **刚好滤不掉** →
+       机器人周围被标出一圈致命障碍 →
+       DWA 报 "Rotate recovery ... potential collision. Cost: -1.00" →
+       导航完全失败。日志完全不提激光，极难查。
+
+       实车定值方法（必做）：把机器人放**空旷处**，跑
+           rostopic echo -n1 /scan/ranges | tr ',' '\n' | sort -n | head
+       最小的那几个就是"扫到自己"的距离，取它 + 0.05。
+  -->
+
+  <node pkg="laser_filters" type="scan_to_scan_filter_chain"
+        name="laser_filter" output="screen">
+    <rosparam command="load"
+              file="$(find carebot_nav_kit)/config/filters/laser_filter_chain.yaml" />
+    <remap from="scan"          to="$(arg input_topic)" />
+    <remap from="scan_filtered" to="$(arg output_topic)" />
+  </node>
+
+</launch>

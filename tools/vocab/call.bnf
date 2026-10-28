@@ -1,0 +1,17 @@
+﻿#BNF+IAT 1.0 UTF-8;
+!grammar call;
+!slot <room>;
+!start <callstart>;
+<callstart>:<wake>|<querytemp>|<goto>|<hot>|<fanon>|<fanoff>|<lighton>|<lightoff>|<cuopen>|<cuclose>|<stop>;
+<wake>:老张同学;
+<querytemp>:查询室内温度;
+<room>:厨房|卧室|书房|客厅;
+<goto>:导航到<room>;
+<hot>:我有点热;
+<fanon>:打开厨房风扇;
+<fanoff>:关闭厨房风扇;
+<lighton>:打开卧室灯;
+<lightoff>:关闭卧室灯;
+<cuopen>:打开卧室窗帘;
+<cuclose>:关闭卧室窗帘;
+<stop>:结束语音交互;

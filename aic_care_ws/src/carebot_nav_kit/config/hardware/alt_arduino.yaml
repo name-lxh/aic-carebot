@@ -1,0 +1,79 @@
+# ============================================================================
+#  硬件配置 profile —— 备选配置（兼容旧版/其他批次硬件）
+# ============================================================================
+#  用途：当实验室实车不可用、或换用另一台机器人时，只需把 bringup 的
+#        hw_profile 参数指向本文件，无需改任何代码。
+#
+#  本配置对应：
+#    · 底盘：ros_arduino_python（Arduino/兼容板），/dev/ttyACM0 @57600
+#    · 雷达：ls01d 系列，/dev/laser
+#    · IMU ：art_imu_01，/dev/art_imu
+# ============================================================================
+
+profile_name: "alt_arduino"
+profile_desc: "备选：ros_arduino_python 底盘 + ls01d 雷达 + art_imu_01"
+
+subsystems:
+
+  base:
+    enable: true
+    launch_pkg: ros_arduino_python
+    launch_file: arduino.launch
+    launch_pkg_required: true
+    desc: "Arduino 兼容底盘驱动"
+    publishes:
+      - /odom
+    subscribes:
+      - /cmd_vel
+    fallback_hint: >
+      该驱动的端口/波特率配置在
+      ros_arduino_python/config/my_arduino_params.yaml
+      默认 /dev/ttyACM0 @57600，轮径 0.059、轮距 0.164。
+
+  laser:
+    enable: true
+    launch_pkg: ls01d_lidar
+    launch_file: ls01d_lidar.launch
+    launch_pkg_required: true
+    desc: "ls01d 系列激光雷达"
+    publishes:
+      - /scan
+    frame_id: laser
+    fallback_hint: >
+      该雷达用 /dev/laser（CP2102, 10c4:ea60）。
+      udev 规则：ls01d_lidar/scripts/laser.rules
+
+  imu:
+    enable: true
+    launch_pkg: art_imu_01
+    launch_file: demo.launch
+    launch_pkg_required: true
+    desc: "art_imu_01 惯性单元"
+    publishes:
+      - /imu
+    frame_id: base_imu_link
+    fallback_hint: >
+      该 IMU 用 /dev/art_imu。
+      udev 规则：art_imu_01/config/art_imu.rules
+
+  camera:
+    enable: false
+    launch_pkg: astra_launch
+    launch_file: astra.launch
+    launch_pkg_required: false
+    desc: "深度相机（默认不由本包启动）"
+
+odometry:
+  raw_topic: /odom
+  use_ekf: true
+  ekf_type: robot_localization
+  fused_topic: /odometry/filtered
+  imu_used: true
+
+static_tf_from_base_yaml: true
+
+laser:
+  min_range: 0.10
+  max_range: 8.0
+  slam_max_range: 6.0
+  horizontal: true
